@@ -430,7 +430,12 @@ class OlegDBAdapter():
         return channels
 
     def add_channel(self, channel):
-        """ adds new channel to OlegDB or updates info on existing (except id) """
+        """
+        Adds new channel to OlegDB or updates info on existing (except id)
+        
+        Returns:
+        Channel that was added or updated
+        """
 
         channels = self.get_channel(tg_channel_id = channel.tg_channel_id)
         if not channels:
@@ -447,5 +452,9 @@ class OlegDBAdapter():
             '''
 
         self.db.push(sql,[channel.tg_channel_id, channel.listening, channel.name])
+
+        added = self.get_channel(tg_channel_id = channel.tg_channel_id)[0]
+        
+        return added
 
         

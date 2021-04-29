@@ -4,3 +4,5 @@ psycopg2-binary>=2.8
 tqdm
 python-dotenv
 notebook
+requests
+matplotlib

@@ -3,19 +3,21 @@ from staff.olegtypes import *
 from staff.dba import OlegDBAdapter
 from staff.filters import Filters
 from staff.nn import OlegNN
-from staff.tgstat import TGStatDB
+from staff.crawler import Joiner, CrawlerDB
 import json
 import ast
 import base64
 import hashlib
 import torch
 import time, datetime
+import os
 from apscheduler.schedulers.background import BackgroundScheduler
 
 
 def dumps(o):
     return json.dumps(o,indent=4,ensure_ascii=False)
 
+#TODO: smear the whole app with logs
 class OlegApp():
     """ superclass composing all inhabitants of the app """
     
@@ -33,28 +35,36 @@ class OlegApp():
                  admin_files_directory,
                  bot_files_directory,
                  salt,
+                 logs_dir,
+                 admin_user_id,
+                 nn_lpv_len,
                 ):
+
+        self.logs_dir = logs_dir
+        self._setup_logs_dir()
         
         self.dba = OlegDBAdapter(db_name,db_user,db_password,db_host)
         self.conv = Converters()
         self.hash = OlegHashing(salt = salt, trunc = 7)
-        self.nn = OlegNN()
+        self.nn = OlegNN(nn_lpv_len)
 
-        self.admin = Admin(api_id = api_id,
-                           api_hash = api_hash,
-                           phone = admin_phone,
-                           database_encryption_key = admin_db_encryption_key,
-                           files_directory = admin_files_directory,
-                          )
+        self.admin = Admin(
+            api_id = api_id,
+            api_hash = api_hash,
+            phone = admin_phone,
+            database_encryption_key = admin_db_encryption_key,
+            files_directory = admin_files_directory,)
         
-        self.bot = Bot(api_id = api_id,
-                       api_hash = api_hash,
-                       bot_token = bot_token,
-                       database_encryption_key = bot_db_encryption_key,
-                       files_directory = bot_files_directory,
-                      )
-        
-        self.tdb = TGStatDB('db/tgstat.db', self.admin)
+        self.bot = Bot(
+            api_id = api_id,
+            api_hash = api_hash,
+            bot_token = bot_token,
+            database_encryption_key = bot_db_encryption_key,
+            files_directory = bot_files_directory,
+            admin_user_id = admin_user_id,)
+
+        self.crawler_db = CrawlerDB(db_name,db_user,db_password,db_host)
+        self.joiner = Joiner(self.crawler_db, self.admin, logs_dir = logs_dir)
         
         self.scheduler = BackgroundScheduler(timezone = 'Europe/Moscow')
         self.scheduled = self.scheduler.add_job(
@@ -65,28 +75,11 @@ class OlegApp():
             coalesce = True,
         )
 
-        # attach admin to bot and bot to admin for convenience
-        self.bot.admin = self.admin
-        self.admin.bot = self.bot
-
-        # attach bot to conv
-        self.conv.bot = self.bot
-        
-        # attach dba and conv to bot and admin for convenience
-        self.bot.dba = self.dba
-        self.admin.dba = self.dba
-
-        self.bot.conv = self.conv
-        self.admin.conv = self.conv
-
-        # attach hash to bot for convenience
-        self.bot.hash = self.hash
-
-        # attach nn to bot and admin
-        self.bot.nn = self.nn
-        self.admin.nn = self.nn
-
-        self.nn.dba = self.dba
+        # attach OlegApp to sub-objects so they have access to other inhabitants of app
+        self.bot.app = self
+        self.admin.app = self
+        self.nn.app = self
+        self.conv.app = self
 
 
     def start(self):
@@ -97,17 +90,24 @@ class OlegApp():
         self.admin.start()
         self.bot.start()
         self.scheduler.start()
-        #self.tdb.start()
+        self.crawler_db.start()
+
         
         
     def stop(self):
         """ graceful shutdown """
         
-        #self.tdb.stop()
+        self.joiner.stop()
+        self.crawler_db.stop()
         self.scheduler.shutdown(wait=False)
         self.bot.stop()
         self.admin.stop()
         self.dba.stop()
+
+    def _setup_logs_dir(self):
+        if not os.path.isdir(self.logs_dir):
+            os.mkdir(self.logs_dir)
+
         
         
 class Admin():
@@ -167,26 +167,26 @@ class Admin():
                 #print('chat listening and type supported ok')
 
                 # check for emb from previous post from this channel
-                prev = self.dba.get_posts(tg_channel_id = sender_id, have_content=True, limit = 100)
+                prev = self.app.dba.get_posts(tg_channel_id = sender_id, have_content=True, limit = 100)
                 emb = None
                 if prev:
-                    emb, bias = self.nn.mean_of_posts(prev)
+                    emb, bias = self.app.nn.mean_of_posts(prev)
                     #print('got existing emb: ', emb[:5], bias,sep='\n')
                 if not isinstance(emb,torch.Tensor):
-                    emb = self.nn.get_init_emb()
+                    emb = self.app.nn.get_init_emb()
                     bias = torch.tensor([0])
 
                 # write new post to OlegDB
                 post = self._prepare_oleg_post(message)
-                post = self.dba.add_post(post)
+                post = self.app.dba.add_post(post)
 
                 # update embeddings
-                self.nn.add_emb(where = 'post', post = post, emb = emb, bias = bias)
+                self.app.nn.add_emb(where = 'post', post = post, emb = emb, bias = bias)
                 # forward new post to bot, so bot will have access to media
                 res = self.tdutil.forward_post(
                     from_msg_id = post.tg_msg_id,
                     from_channel_id = post.tg_channel_id,
-                    to_user_id = self.bot.user_id
+                    to_user_id = self.app.bot.user_id
                 )
                 if res.error:
                     print(res.error_info)
@@ -195,14 +195,14 @@ class Admin():
         """ takes TDLib.message and checks if type of content is supported by OlegAI """
         
         if ((message.get('@type','') == 'message') and
-            (message.get('content',{}).get('@type','') in self.conv.supported)):
+            (message.get('content',{}).get('@type','') in self.app.conv.supported)):
             return True
         else:
             return False
 
-    def _listening(self,sender_id):
+    def _listening(self, sender_id):
         """ takes chat_id and checks if we listen to it """
-        channel = self.dba.get_channel(tg_channel_id=sender_id)
+        channel = self.app.dba.get_channel(tg_channel_id=sender_id)
         listening = False
         if channel:
             channel = channel[0]
@@ -227,8 +227,12 @@ class Admin():
 
     def join_chat_mute(self, chat_id=None, link=None):
         """
-        joins chat by chat_id or link and mutes it.
-        Returns tg.result to be able to handle tg.result.error 
+        Joins chat by chat_id or link and mutes it.
+
+        Returns:
+        joined (bool): if joined successful
+        result (dict): tg.result to be able to handle tg.result.error 
+        channel (Channel): if joined, returns this channel as Channel object
         """
 
         if chat_id is not None:
@@ -242,13 +246,14 @@ class Admin():
                 chat_id = chat.get('id',0)
                 joined = True
 
+        channel = None
         if joined:
             name = self.tdutil.get_chat_title(chat_id = chat_id)
-            self.dba.add_channel(Channel(tg_channel_id = chat_id, listening = 1, name = name))
+            channel = self.app.dba.add_channel(Channel(tg_channel_id = chat_id, listening = True, name = name))
             time.sleep(1)
             self.tdutil.mute_chat(chat_id)
         
-        return joined, result
+        return joined, result, channel
         
 
 
@@ -269,7 +274,7 @@ class TDLibUtils():
                  files_directory=None
                 ):
         
-        self._command_handlers = {}
+        self._command_handlers = []
         self._message_handlers = []
         self.greeting = None
         
@@ -296,10 +301,10 @@ class TDLibUtils():
 
         return result
         
-    def add_command_handler(self,command,handler):
+    def add_command_handler(self, command, handler, fltr=Filters.all):
         ''' adds command handler '''
-        self._command_handlers[command] = handler
-        
+        self._command_handlers.append(CommandHandler(command,handler,fltr))
+
     def add_message_handler(self,filter,handler):
         ''' adds message handler '''
         self._message_handlers.append(MessageHandler(filter,handler))
@@ -316,13 +321,12 @@ class TDLibUtils():
         sender_type = m.get('sender',{}).get('@type','')
 
         # parse bot commands
-        command,params = self._parse_commands(m)
+        command, params = self._parse_commands(m)
         
-        if (command in self._command_handlers) and sender_type == 'messageSenderUser':
-            self._command_handlers[command](m,params)
-        else: self._apply_msg_filter(m)
-
-    
+        if command: 
+            self._apply_command_filter(m, command, params)
+        else:
+            self._apply_msg_filter(m)
 
     def _parse_commands(self,message):
         """ parses bot commands from TDLib.message, returns a list without '/' """
@@ -331,7 +335,6 @@ class TDLibUtils():
         entities = message.get('content',{}).get('text',{}).get('entities',[])
         
         command, params = (None,None)
-        result = []
         for e in entities:
             if e.get('type',{}).get('@type','') == 'textEntityTypeBotCommand':
                 offset = e.get('offset',0)
@@ -342,7 +345,7 @@ class TDLibUtils():
                 params = (text[end:]).split(' ')
                 params = list(filter(bool,params))
                 break
-        return command,params
+        return command, params
 
     def _apply_msg_filter(self,message):
         """ reads all handlers from self._message_handlers and takes first whose filter returns True """
@@ -351,6 +354,15 @@ class TDLibUtils():
             if h.filter(message):
                 h.handler(message)
                 break
+
+    def _apply_command_filter(self, message, command, params):
+        """ reads all handlers from self._command_handlers and takes first whose filter returns True """
+
+        for h in self._command_handlers:
+            if h.command == command:
+                if h.filter(message):
+                    h.handler(message,params)
+
 
     def get_post(self, tg_channel_id, tg_msg_id):
         """ returns post from tdlib """
@@ -483,20 +495,23 @@ class Bot():
     bot and bot user
     """
     
-    def __init__(self,
-                 api_id,
-                 api_hash,
-                 bot_token,
-                 database_encryption_key,
-                 files_directory,
-                ):
+    def __init__(
+        self,
+        api_id,
+        api_hash,
+        bot_token,
+        database_encryption_key,
+        files_directory,
+        admin_user_id,):
         
-        self.tdutil = TDLibUtils(api_id = api_id,
-                                 api_hash = api_hash,
-                                 database_encryption_key = database_encryption_key,
-                                 bot_token = bot_token,
-                                 files_directory = files_directory)
-        
+        self.tdutil = TDLibUtils(
+            api_id = api_id,
+            api_hash = api_hash,
+            database_encryption_key = database_encryption_key,
+            bot_token = bot_token,
+            files_directory = files_directory)
+
+        self.admin_user_id = admin_user_id
         
     def start(self):
         
@@ -507,13 +522,15 @@ class Bot():
         self.tdutil.add_command_handler('start',self.start_handler)
         self.tdutil.add_command_handler('send_new',self.send_new_handler)
         self.tdutil.add_command_handler('send_channel',self.send_channels_last)
-        self.tdutil.add_message_handler(Filters.forwarded & Filters.user(self.admin.user_id), self.got_admin_forward)
+        self.tdutil.add_command_handler('start_joiner', self.start_joiner_handler, Filters.user(self.admin_user_id))
+        self.tdutil.add_command_handler('stop_joiner', self.stop_joiner_handler, Filters.user(self.admin_user_id))
+        self.tdutil.add_message_handler(Filters.forwarded & Filters.user(self.app.admin.user_id), self.got_admin_forward)
         self.tdutil.tg.add_update_handler('updateNewCallbackQuery', self.callback_query_handler)
         
         self.tdutil.start()
 
         self.user_id = self.tdutil.get_me()
-        self.reactions = self.dba.get_reactions()
+        self.reactions = self.app.dba.get_reactions()
 
         
     def stop(self):
@@ -526,12 +543,12 @@ class Bot():
         if  message.get('sender',{}).get('@type','') == 'messageSenderUser':
             tg_user_id = message.get('chat_id',0)
             # if there is no such user in OlegDB
-            if not self.dba.get_user(tg_user_id = tg_user_id):
-                emb = self.nn.get_init_emb()
-                user = self.dba.register_user(tg_user_id)
+            if not self.app.dba.get_user(tg_user_id = tg_user_id):
+                emb = self.app.nn.get_init_emb()
+                user = self.app.dba.register_user(tg_user_id)
                 if user:
-                    # add user embedding and bias to DB
-                    self.nn.add_emb(where = 'user', user = user, emb = emb, bias = torch.tensor([0]))
+                    # add user embedding and bias to nn
+                    self.app.nn.add_emb(where = 'user', user = user, emb = emb, bias = torch.tensor([0]))
                     self.tdutil.tg.send_message(chat_id=tg_user_id, text='You\'ve been registered!')
                     self._user_send_new(user)
                     
@@ -548,41 +565,49 @@ class Bot():
         """ sends new post when user asks with /send_new """
         
         tg_user_id = message.get('chat_id',0)
-        user = self.dba.get_user(tg_user_id=tg_user_id)
+        user = self.app.dba.get_user(tg_user_id=tg_user_id)
         self._user_send_new(user)
 
     def send_channels_last(self, message, params):
         """ sends last post from given channel to user from which message was received """
 
         tg_user_id = message.get('chat_id',0)
-        user = self.dba.get_user(tg_user_id = tg_user_id)
-        post = self.dba.get_posts(tg_channel_id = params[0],have_content=True)
+        user = self.app.dba.get_user(tg_user_id = tg_user_id)
+        post = self.app.dba.get_posts(tg_channel_id = params[0],have_content=True,limit=1)
         if post:
             post = post[0]
 
-        to_send = self._prepare_message(user,post)
+            to_send = self._prepare_message(user,post)
 
-        res = self.tdutil.send_message(to_send)
-        if res.error:
-            print(res.error_info)
-        
+            res = self.tdutil.send_message(to_send)
+            if res.error:
+                print(res.error_info)
+        else:
+            res = self.tdutil.tg.send_message(chat_id=user.tg_user_id, text=f'No posts found from channel {params[0]}')
+
+    def start_joiner_handler(self,message, params):
+        self.app.joiner.start()
+
+    def stop_joiner_handler(self, message, params):
+        self.app.joiner.stop()
+
     def _user_send_new(self, user:User):
         """ selects post from pool of unseen and sends it to user_id """
-        
+
         # if post's not found in TDLib, delete it, try 10 times, if fails, just pass
         for i in range(10):
             # select all posts within last 3-5 days based on tg_timestamp. Now selects 1000 last
             ten_days_ago = (datetime.datetime.now() - datetime.timedelta(days=10)).timestamp()
-            posts = self.dba.get_posts(
-                have_content=True,
-                except_user=user.id,
+            posts = self.app.dba.get_posts(
+                have_content = True,
+                except_user = user.id,
                 tg_timestamp_range = (ten_days_ago, time.time())
             )
             if not posts:
                 self.tdutil.tg.send_message(chat_id=user.tg_user_id, text='No new messages :(')
                 return
 
-            filtered = self.nn.closest(posts,user)
+            filtered = self.app.nn.closest(posts,user)
             to_send = self._prepare_message(user, filtered)
             if to_send: break
 
@@ -593,7 +618,7 @@ class Bot():
             print(res.error_info)
 
         # write reposted info to OlegDB.reposts
-        self.dba.add_repost(filtered,user)
+        self.app.dba.add_repost(filtered,user)
 
     def _prepare_message(self,user,post):
         """
@@ -602,15 +627,15 @@ class Bot():
         Returns: if message was found in TDLib, converts it and returns result. Otherwise returns None
         """
 
-        tdmessage = self.admin.tdutil.get_post(tg_channel_id=post.tg_channel_id, tg_msg_id=post.tg_msg_id)
+        tdmessage = self.app.admin.tdutil.get_post(tg_channel_id=post.tg_channel_id, tg_msg_id=post.tg_msg_id)
         if not tdmessage:
-            self.dba.set_content_downloaded(post, False)
-            print(f'post {post} not found, setting content_downloaded=0')
+            self.app.dba.set_content_downloaded(post, False)
+            #print(f'post {post} not found, setting content_downloaded=0')
             return None
 
-        chat_title = self.admin.tdutil.get_chat_title(tdmessage)
-        messagelink = self.admin.tdutil.get_message_link(tdmessage)
-        res = self.conv.convert(
+        chat_title = self.app.admin.tdutil.get_chat_title(tdmessage)
+        messagelink = self.app.admin.tdutil.get_message_link(tdmessage)
+        res = self.app.conv.convert(
             user_id = user.id,
             post_id = post.id,
             tg_user_id = user.tg_user_id,
@@ -633,10 +658,10 @@ class Bot():
         tg_msg_id = message.get('forward_info',{}).get('origin',{}).get('message_id',0)
         tg_channel_id = message.get('forward_info',{}).get('origin',{}).get('chat_id',0)
         
-        posts = self.dba.get_posts(tg_msg_id = tg_msg_id, tg_channel_id = tg_channel_id)
+        posts = self.app.dba.get_posts(tg_msg_id = tg_msg_id, tg_channel_id = tg_channel_id)
         
         if posts:
-            self.dba.set_content_downloaded(posts[0])
+            self.app.dba.set_content_downloaded(posts[0])
 
     def callback_query_handler(self,update):
         """ handles callbacks from inline keyboards """
@@ -645,7 +670,7 @@ class Bot():
 
         # decode payload from base64 encoded string
         # this will return string only if it was properly hashed:
-        payload = self.hash.hash_b64decode(payload)
+        payload = self.app.hash.hash_b64decode(payload)
         
         if payload:
             route = payload.split(' ')[0]
@@ -668,11 +693,11 @@ class Bot():
         user_id = int(user_id)
         post_id = int(post_id)
         reaction_id = int(reaction_id)
-        self.dba.update_reaction(user_id, post_id, reaction_id)
+        self.app.dba.update_reaction(user_id, post_id, reaction_id)
         #self.edit_inline_keyboard(user_id,post_id, reaction_id)
         self.tdutil.answer_callback_query(query_id = query_id, text = self.reactions[reaction_id].text)
-        self._user_send_new(self.dba.get_user(user_id=user_id))
-        self.nn.got_new_reaction()
+        self._user_send_new(self.app.dba.get_user(user_id=user_id))
+        self.app.nn.got_new_reaction()
 
     def got_callback_command(self, payload, query_id):
 
@@ -680,7 +705,7 @@ class Bot():
         command = payload[2]
         user_id = payload[1]
 
-        user = self.dba.get_user(user_id = user_id)
+        user = self.app.dba.get_user(user_id = user_id)
 
         if command == 'send_new':
             self._user_send_new(user)
@@ -689,7 +714,7 @@ class Bot():
     def scheduled_mailing(self):
         """ this is called when scheduled time of mass mailing of new posts come """
 
-        users = self.dba.get_users()
+        users = self.app.dba.get_users()
         for u in users:
             self._user_send_new(u)
         
@@ -791,12 +816,12 @@ class Converters():
         """ appends reply buttons to the TDLib.sendMessage """
         
         m = message
-        reactions = self.bot.reactions
+        reactions = self.app.bot.reactions
 
         buttons = []
         for key in reactions:
             r = reactions[key]
-            data = self.bot.hash.hash_b64encode(f'VOTE {user_id} {post_id} {r.id}')
+            data = self.app.hash.hash_b64encode(f'VOTE {user_id} {post_id} {r.id}')
             button = {
                 'text' : str(r.emoji),
                 'type' : {
@@ -817,7 +842,7 @@ class Converters():
     def _append_moar_button(self,message,user_id):
         """ appends MOAR button to reply keyboard """
 
-        data = self.bot.hash.hash_b64encode(f'COMMAND {user_id} send_new')
+        data = self.app.bot.hash.hash_b64encode(f'COMMAND {user_id} send_new')
         button = {
             'text': 'MOAR!',
             'type': {

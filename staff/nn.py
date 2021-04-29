@@ -6,34 +6,30 @@ from staff.olegtypes import *
 
 class DotProduct(nn.Module):
     """ Dot product model for learning """
-    def __init__(self, user_emb, user_bias, post_emb, post_bias, pretrained = False):
+    def __init__(self, user_emb, user_bias, post_emb, post_bias, idx2user, idx2post):
         """
         Args:
-        pretrained (bool): if set, takes embeddings as torch.Tensor from following args:
-            user_emb, user_bias, post_emb, post_bias;
-            If False, reads user_emb, user_bias, post_emb, post_bias as tuples denoting dimensions of nn.Embedding 
-        
+        user_emb, user_bias, post_emb, post_bias are tuples denoting dimensions of nn.Embedding
+        idx2user, idx2post - lists where elements are ids of users (posts) in OlegDB,
+            indexes equal to their indexes in embedding matrices
         """
         super(DotProduct, self).__init__()
 
         self.sig = nn.Sigmoid()
 
-        if pretrained:
-            self.u = nn.Embedding.from_pretrained(user_emb)
-            self.u.weight.requires_grad = True
-            self.u_bias = nn.Embedding.from_pretrained(user_bias)
-            self.u_bias.weight.requires_grad = True
+        self.u = nn.Embedding(*user_emb)
+        self.u_bias = nn.Embedding(*user_bias)
 
-            self.p = nn.Embedding.from_pretrained(post_emb)
-            self.p.weight.requires_grad = True
-            self.p_bias = nn.Embedding.from_pretrained(post_bias)
-            self.p_bias.weight.requires_grad = True
-        else:
-            self.u = nn.Embedding(*user_emb)
-            self.u_bias = nn.Embedding(*user_bias)
+        self.p = nn.Embedding(*post_emb)
+        self.p_bias = nn.Embedding(*post_bias)
 
-            self.p = nn.Embedding(*post_emb)
-            self.p_bias = nn.Embedding(*post_bias)
+        # attach vocabs to model
+        self.idx2post = idx2post
+        self.idx2user = idx2user
+        # user and post vocabulars:
+        # keys are DB user_ids, values are idxs in embedding matrices 
+        self.user2idx = {o:i for i,o in enumerate(idx2user)}
+        self.post2idx = {o:i for i,o in enumerate(idx2post)}
 
     def forward(self, x):
         users = self.u(x[:,0])
@@ -61,7 +57,7 @@ class DataLoader():
         self.bs = bs
         self.ur = ur
 
-        self.cur = 0 # points to current idx in ur
+        self.cur = 0 # points on current idx in ur
 
         self.user2idx = user2idx
         self.post2idx = post2idx
@@ -131,16 +127,16 @@ class OlegNN():
 
     lr = 100        # learning rate
     bs = 512        # batch size 
-    lpv_len = 50    # length of embedding vectors (same for users and posts)
     new_reactions_threshold = 1 # how many new reactions to get to start incremental learning cycle
-    learning_timeout = 1        # min seconds between learning cycles
+    learning_timeout = 10       # min seconds between learning cycles
     full_learn_threshold = 4    # how many incremental cycles of learning to pass to start a full learning cycle
                                 #   0 - every cycle is full
     incremental_epochs = 10     # epochs for incremental training on new reactions
     full_learn_epochs = 35      # epochs to train on new learning dataset
 
 
-    def __init__(self):
+    def __init__(self, lpv_len):
+        self.lpv_len = int(lpv_len)         # length of latent parameters vector
         self.new_reactions_counter = 0      # new reactions since last learning cycle
         self.inc_cycles = 0                 # how many incremental cycles have passed since last full cycle
         self.last_learning_cycle = 0        # when was last learning cycle
@@ -157,22 +153,17 @@ class OlegNN():
         """ instantiates new model with random embeddings """
         
         # make vocab for posts
-        idx2post = self.dba.get_post_ids()
-        idx2user = self.dba.get_user_ids()
+        idx2post = self.app.dba.get_post_ids()
+        idx2user = self.app.dba.get_user_ids()
         self.model = DotProduct(
             (len(idx2user),self.lpv_len),
             (len(idx2user),1),
             (len(idx2post),self.lpv_len),
-            (len(idx2post),1)
+            (len(idx2post),1),
+            idx2user,
+            idx2post
         )
 
-        # attach vocabs to model
-        self.model.idx2post = idx2post
-        self.model.idx2user = idx2user
-        # user and post vocabulars:
-        # keys are DB user_ids, values are idxs in embedding matrices 
-        self.model.user2idx = {o:i for i,o in enumerate(idx2user)}
-        self.model.post2idx = {o:i for i,o in enumerate(idx2post)}
 
     def closest(self,posts,user):
         """ returns post closest to user """
@@ -248,14 +239,16 @@ class OlegNN():
 
         # get reactions
         if full:
-            ur = self.dba.get_user_reactions()
+            ur = self.app.dba.get_user_reactions()
             self.init_model()
         else:
-            ur = self.dba.get_user_reactions(learned=0)
+            ur = self.app.dba.get_user_reactions(learned=0)
             # add 96% old reactions to dataset or 4 batches
-            ur = ur + self.dba.get_user_reactions(learned=1,limit=max(len(ur)*30,self.bs*4-len(ur)))
+            ur = ur + self.app.dba.get_user_reactions(learned=1,limit=max(len(ur)*30,self.bs*4-len(ur)))
         
-        if not ur: return
+        if not ur:
+            self.learning = False
+            return
 
         #print(f'{(time.time()-st):.4f} got {len(ur)} reactions')
         
@@ -272,11 +265,11 @@ class OlegNN():
             epochs = self.incremental_epochs
 
         loss_func = nn.MSELoss()
-        self._learn(dl,self.model,loss_func, epochs=epochs)
+        self._learn(dl, self.model, loss_func, epochs)
         #print(f'{(time.time()-st):.4f} finished learning')
 
         # set learned=1 for reactions in dl
-        self.dba.set_reactions_learned(ur)
+        self.app.dba.set_reactions_learned(ur)
 
         if full:
             self._update_rest_emb()
@@ -309,7 +302,7 @@ class OlegNN():
         """
         
         # get unique channels from dataset
-        posts = self.dba.get_posts(dataset = 'include')
+        posts = self.app.dba.get_posts(dataset = 'include')
         u_channels = []
         for p in posts:
             u_channels.append(p.tg_channel_id)
@@ -320,17 +313,13 @@ class OlegNN():
 
         for c in u_channels:
             # get posts from this channel that were in training dataset
-            ref_posts = self.dba.get_posts(tg_channel_id = c, dataset='include', have_content=True, limit=1000)
-            #ref_posts_v = tensor(list(map(self.post2idx,ref_posts)))
-            #channel_emb = self.model.p.weight[ref_posts_v].mean(dim=0)
-            #channel_bias = self.model.p_bias.weight[ref_posts_v].mean(dim=0)
+            ref_posts = self.app.dba.get_posts(tg_channel_id = c, dataset='include', have_content=True, limit=1000)
             channel_emb, channel_bias = self.mean_of_posts(ref_posts)
             # get all posts from this channel that were not in learning dataset
-            non_ds_posts = self.dba.get_posts(tg_channel_id = c, dataset = 'exclude', have_content=True)
+            non_ds_posts = self.app.dba.get_posts(tg_channel_id = c, dataset = 'exclude', have_content=True)
             for p in non_ds_posts: 
                 self.model.p.weight[self.post2idx(p.id)] = self.shuffle(channel_emb)
                 self.model.p_bias.weight[self.post2idx(p.id)] = channel_bias
-            #print(f'{(time.time()-self.st):.4f} finished channel {c}')
         self.model.p.requires_grad_(True)
         self.model.p_bias.requires_grad_(True)
 
@@ -396,6 +385,7 @@ class OlegNN():
         # add emb to user embeddings
         elif where == 'user':
             if user.id not in self.model.user2idx:
+
                 emb_rows = self.model.u.weight.shape[0]
 
                 # add row to emb and bias
@@ -403,6 +393,7 @@ class OlegNN():
                     torch.cat((self.model.u.weight.detach(), emb), dim=0)
                 )
                 self.model.u.weight.requires_grad_(True)
+
                 self.model.u_bias = nn.Embedding.from_pretrained(
                     torch.cat((self.model.u_bias.weight.detach(), bias), dim=0)
                 )

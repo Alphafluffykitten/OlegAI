@@ -66,7 +66,7 @@ class Filters:
             self.chat_id = chat_id
 
         def filter(self,message):
-            return (message.get('chat_id',0) == self.chat_id)
+            return (str(message.get('chat_id',0)) == str(self.chat_id))
     
     class _User(BaseFilter):
         """ messages from specified chat_id """

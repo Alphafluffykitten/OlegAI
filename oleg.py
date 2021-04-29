@@ -3,8 +3,8 @@ from staff.utils import OlegApp
 import threading, signal
 import os
 
-#logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-#                     level=logging.DEBUG)
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                     level=logging.INFO)
 
 stopit = threading.Event()
 def got_ipt(signo,frame):
@@ -27,7 +27,10 @@ app = OlegApp(
     bot_db_encryption_key = env['bot_db_encryption_key'],
     admin_files_directory = env['admin_files_directory'],
     bot_files_directory = env['bot_files_directory'],
-    salt = env['salt']
+    salt = env['salt'],
+    logs_dir = env['logs_dir'],
+    admin_user_id = env['admin_user_id'],
+    nn_lpv_len = env['nn_lpv_len']
 )
 
 

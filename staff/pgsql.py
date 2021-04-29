@@ -60,7 +60,7 @@ class PostgresDB:
         make SQL injection in current thread conn
         sql: str. SQL injection
         values: list. List of values for parametrized SQL query,
-                      e.g. sql = 'INSERT INTO tbl (col1,col2,col3) VALUES (?,?,?)'
+                      e.g. sql = 'INSERT INTO tbl (col1,col2,col3) VALUES (%s,%s,%s)'
                            values = [1,2,3]
         '''
         conn = self.get_conn()
