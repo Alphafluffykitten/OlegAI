@@ -636,7 +636,6 @@ class Bot():
                 filtered = p
             else:
                 # select posts within last 10 days
-                print('getting regular post')
                 posts = self.app.dba.get_posts(
                     have_content = True,
                     except_user = user.id,
