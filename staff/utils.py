@@ -38,6 +38,9 @@ class OlegApp():
                  logs_dir,
                  admin_user_id,
                  nn_lpv_len,
+                 nn_new_reactions_threshold,
+                 nn_learning_timeout,
+                 nn_full_learn_threshold,
                 ):
 
         self.logs_dir = logs_dir
@@ -46,7 +49,12 @@ class OlegApp():
         self.dba = OlegDBAdapter(db_name,db_user,db_password,db_host)
         self.conv = Converters()
         self.hash = OlegHashing(salt = salt, trunc = 7)
-        self.nn = OlegNN(nn_lpv_len)
+        self.nn = OlegNN(
+            nn_lpv_len,
+            nn_new_reactions_threshold,
+            nn_learning_timeout,
+            nn_full_learn_threshold,
+        )
 
         self.admin = Admin(
             api_id = api_id,
@@ -519,7 +527,7 @@ class Bot():
         self.tdutil.greeting = self.user_greeting
 
         # set bot handlers
-        self.tdutil.add_command_handler('start',self.start_handler)
+        #self.tdutil.add_command_handler('start',self.start_handler)
         self.tdutil.add_command_handler('send_new',self.send_new_handler)
         self.tdutil.add_command_handler('send_channel',self.send_channels_last)
         self.tdutil.add_command_handler('start_joiner', self.start_joiner_handler, Filters.user(self.admin_user_id))
@@ -549,16 +557,34 @@ class Bot():
                 if user:
                     # add user embedding and bias to nn
                     self.app.nn.add_emb(where = 'user', user = user, emb = emb, bias = torch.tensor([0]))
-                    self.tdutil.tg.send_message(chat_id=tg_user_id, text='You\'ve been registered!')
+                    self.user_bootstrap(user)
                     self._user_send_new(user)
                     
+    def user_bootstrap(self, user):
+        """ routine for newly registered user """
+
+        res = self.tdutil.tg.send_message(chat_id=user.tg_user_id,
+            text='Я собираю посты со всех русскоязычных пабликов Телеграма'
+        )
+        res.wait()
+        time.sleep(3)
+        self.tdutil.tg.send_message(chat_id=user.tg_user_id,
+            text='Лучшие посты буду отправлять вам'
+        )
+        res.wait()
+        time.sleep(3)
+        self.tdutil.tg.send_message(chat_id=user.tg_user_id,
+            text='Ставьте 👍 или 💩, я обучаюсь на ваших оценках'
+        )
+        res.wait()
+        time.sleep(2)
         
     def start_handler(self, message, params):
         """ on /start """
 
         tg_user_id = message.get('chat_id',0)
         
-        self.tdutil.tg.send_message(chat_id=tg_user_id, text='Hi!')
+        #self.tdutil.tg.send_message(chat_id=tg_user_id, text='Hi!')
         
     
     def send_new_handler(self, message, params):
@@ -594,20 +620,34 @@ class Bot():
     def _user_send_new(self, user:User):
         """ selects post from pool of unseen and sends it to user_id """
 
+        ten_days_ago = (datetime.datetime.now() - datetime.timedelta(days=10)).timestamp()
         # if post's not found in TDLib, delete it, try 10 times, if fails, just pass
         for i in range(10):
-            # select all posts within last 3-5 days based on tg_timestamp. Now selects 1000 last
-            ten_days_ago = (datetime.datetime.now() - datetime.timedelta(days=10)).timestamp()
-            posts = self.app.dba.get_posts(
-                have_content = True,
-                except_user = user.id,
-                tg_timestamp_range = (ten_days_ago, time.time())
-            )
-            if not posts:
-                self.tdutil.tg.send_message(chat_id=user.tg_user_id, text='No new messages :(')
-                return
+            # if user is fresh, feed him posts with highest bias (sweetest shit we have)
+            if self.app.dba.count_reposts(user) < 30:
+                max_bias_posts = self.app.dba.get_posts(ids=self.app.nn.get_max_bias())
+                # get max biased post that havent been reposted to this user
+                for p in max_bias_posts:
+                    if (
+                        (not self.app.dba.get_reposts(post_id = p.id, user_id=user.id))
+                        and (p.content_downloaded)
+                    ):
+                        break
+                filtered = p
+            else:
+                # select posts within last 10 days
+                print('getting regular post')
+                posts = self.app.dba.get_posts(
+                    have_content = True,
+                    except_user = user.id,
+                    tg_timestamp_range = (ten_days_ago, time.time())
+                )
+                if not posts:
+                    self.tdutil.tg.send_message(chat_id=user.tg_user_id, text='No new messages :(')
+                    return
 
-            filtered = self.app.nn.closest(posts,user)
+                filtered = self.app.nn.closest(posts,user)
+
             to_send = self._prepare_message(user, filtered)
             if to_send: break
 

@@ -74,13 +74,13 @@ class PostgresDB:
         conn.commit()
         cur.close()
     
-    def query(self,sql):
+    def query(self,sql, values:list=[]):
         ''' make SQL query in current thread conn '''
         conn = self.get_conn()
         cur = conn.cursor()
         rows = []
         try:
-            cur.execute(sql)
+            cur.execute(sql,values)
             rows = cur.fetchall()
         except Error as e:
             print(f'SQL caused error. \nSQL:\n{sql}')

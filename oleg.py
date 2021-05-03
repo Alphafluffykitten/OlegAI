@@ -30,7 +30,10 @@ app = OlegApp(
     salt = env['salt'],
     logs_dir = env['logs_dir'],
     admin_user_id = env['admin_user_id'],
-    nn_lpv_len = env['nn_lpv_len']
+    nn_lpv_len = env['nn_lpv_len'],
+    nn_new_reactions_threshold = env['nn_new_reactions_threshold'],
+    nn_learning_timeout = env['nn_learning_timeout'],
+    nn_full_learn_threshold = env['nn_full_learn_threshold'],
 )
 
 

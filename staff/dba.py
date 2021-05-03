@@ -375,6 +375,13 @@ class OlegDBAdapter():
             
         return reposts
 
+    def count_reposts(self,user):
+        """ counts reposts sent to user """
+
+        sql = f'SELECT COUNT(*) FROM {Repost.table_name} WHERE user_id = %s'
+        rows = self.db.query(sql,[user.id])
+        return rows[0][0]
+
     def set_reactions_learned(self, ur):
         """ sets learned=1 in OlegDB.posts for ids """
 

@@ -127,16 +127,21 @@ class OlegNN():
 
     lr = 100        # learning rate
     bs = 512        # batch size 
-    new_reactions_threshold = 1 # how many new reactions to get to start incremental learning cycle
-    learning_timeout = 10       # min seconds between learning cycles
-    full_learn_threshold = 4    # how many incremental cycles of learning to pass to start a full learning cycle
-                                #   0 - every cycle is full
     incremental_epochs = 10     # epochs for incremental training on new reactions
     full_learn_epochs = 35      # epochs to train on new learning dataset
 
+    def __init__(
+        self,
+        lpv_len,                    # length of latent parameters vector
+        nn_new_reactions_threshold, # how many new reactions to start incremental learning cycle
+        nn_learning_timeout,        # min interval between learning cycles, seconds
+        nn_full_learn_threshold,    # how many incremental learning cycles to start a full learning cycle
+    ):
+        self.lpv_len = int(lpv_len)         
+        self.new_reactions_threshold = int(nn_new_reactions_threshold)
+        self.learning_timeout = int(nn_learning_timeout)
+        self.full_learn_threshold = int(nn_full_learn_threshold)
 
-    def __init__(self, lpv_len):
-        self.lpv_len = int(lpv_len)         # length of latent parameters vector
         self.new_reactions_counter = 0      # new reactions since last learning cycle
         self.inc_cycles = 0                 # how many incremental cycles have passed since last full cycle
         self.last_learning_cycle = 0        # when was last learning cycle
@@ -380,7 +385,6 @@ class OlegNN():
                 # add value to vocab
                 self.model.idx2post.append(post.id)
                 self.model.post2idx[post.id] = emb_rows
-                #print(f'addin value to vocab post.id = {post.id} | {self.model.post2idx[post.id]}')
 
         # add emb to user embeddings
         elif where == 'user':
@@ -407,7 +411,7 @@ class OlegNN():
 
         self.learning = False
 
-    def mean_of_posts(self,posts):
+    def mean_of_posts(self, posts):
         """ returns mean embedding and bias of posts """
 
         post_ids = []
@@ -418,3 +422,20 @@ class OlegNN():
         emb = embs.mean(dim=0)
         bias = biases.mean(dim=0)
         return emb, bias
+    
+    def get_max_bias(self,k=100):
+        """
+        Returns list of post indexes with max bias, in descending order
+        Args:
+        k (int): how many top elements to get
+        """
+
+        topk = torch.topk(self.model.p_bias.weight,k,dim=0,sorted=True)
+        v_idxs = topk.indices.squeeze().tolist()
+
+        post_idxs = []
+        for i in v_idxs:
+            post_idxs.append(self.model.idx2post[i])
+        
+        return post_idxs
+

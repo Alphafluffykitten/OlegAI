@@ -7,16 +7,16 @@ class BaseDBObject(SimpleNamespace):
         
 
 class User(BaseDBObject):
-    """ object representing user """
+    """ user """
     pass
 
 
 class Post(BaseDBObject):
-    """ object representing OlegDB post """
+    """ OlegDB post """
     pass
         
 class MessageHandler(SimpleNamespace):
-    """ object representing TDLibUtils messages handler """
+    """ TDLibUtils messages handler """
     def __init__(self,
                  filter,
                  handler
@@ -25,29 +25,36 @@ class MessageHandler(SimpleNamespace):
         self.handler = handler
 
 class CommandHandler(SimpleNamespace):
-    """ object representing TDLibUtils commands handler """
+    """ TDLibUtils commands handler """
     def __init__(self,command,handler,fltr):
         self.command = command
         self.handler = handler
         self.filter = fltr
 
 class Reaction(BaseDBObject):
-    """ object representing reaction  """
+    """ reaction  """
     pass
 
 class UserReaction(BaseDBObject):
-    """object representing user's reaction to given post """
+    """ user's reaction to given post """
     pass
 
 class Repost(BaseDBObject):
-    """object representing repost"""
-    pass
+    """ repost"""
+
+    table_name = 'reposts'
+    cols = [
+        'id',
+        'internal_post_id',
+        'user_id'
+    ]
 
 class Channel(BaseDBObject):
-    """ object representing Channel """
+    """ channel """
     pass
   
 class ChannelPool(BaseDBObject):
+    """ channel from channel_pool """
     table_name = 'channel_pool'
     cols = [
         'id',
