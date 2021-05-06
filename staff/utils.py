@@ -210,11 +210,10 @@ class Admin():
 
     def _listening(self, sender_id):
         """ takes chat_id and checks if we listen to it """
-        channel = self.app.dba.get_channel(tg_channel_id=sender_id)
+        channel = self.app.dba.get_channels(tg_channel_id=sender_id)
         listening = False
         if channel:
-            channel = channel[0]
-            listening = channel.listening
+            listening = channel[0].listening
         return listening
 
         
@@ -438,6 +437,15 @@ class TDLibUtils():
             user = update.get('id',0)
             return user
 
+    def get_username(self, tg_user_id):
+        """ returns username of Telegram user by his TG id """
+
+        data = {
+            'user_id': tg_user_id
+        }
+        result = self._send_data('getUser', data)
+        if result.update:
+            return result.update.get('username','')
 
     def answer_callback_query(self, query_id, text):
         data = {
@@ -550,10 +558,11 @@ class Bot():
         # if message from a user, not a chat
         if  message.get('sender',{}).get('@type','') == 'messageSenderUser':
             tg_user_id = message.get('chat_id',0)
+            username = self.tdutil.get_username(tg_user_id)
             # if there is no such user in OlegDB
             if not self.app.dba.get_user(tg_user_id = tg_user_id):
                 emb = self.app.nn.get_init_emb()
-                user = self.app.dba.register_user(tg_user_id)
+                user = self.app.dba.register_user(tg_user_id, username)
                 if user:
                     # add user embedding and bias to nn
                     self.app.nn.add_emb(where = 'user', user = user, emb = emb, bias = torch.tensor([0]))

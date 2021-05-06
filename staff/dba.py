@@ -3,6 +3,7 @@ from staff.olegtypes import *
 import threading
 from types import SimpleNamespace as NS
 import json
+import time
 
 class OlegDBAdapter():
     """ DB adapter for PostgreSQL. Holds info about OlegDB structure and provides objects from DB to clients """
@@ -19,22 +20,20 @@ class OlegDBAdapter():
     def stop(self):
         self.db.close()
         
-    def register_user(self,tg_user_id):
+    def register_user(self, tg_user_id, username):
         """ registers new user if there is no such tg_user_id, returns True if registered """
         
         user = self.get_user(tg_user_id = tg_user_id)
         
-        #new_user = False
         if not user:
             sql = f'''
-                INSERT INTO users (tg_user_id)
-                 VALUES ({tg_user_id})
+                INSERT INTO {User.table_name} (tg_user_id, username, timestamp)
+                 VALUES (%s, %s, %s)
             '''
-            self.db.push(sql)
+            self.db.push(sql,[tg_user_id, username, int(time.time())])
 
-            # get new user's user_id
+            # get new user
             user = self.get_user(tg_user_id = tg_user_id)
-            #new_user = True
             return user
         else:
             return False
@@ -43,24 +42,24 @@ class OlegDBAdapter():
         """ returns User object by OlegDB.users.id or OlegDB.users.tg_user_id """
         
         if user_id:
-            sql = f'SELECT id, tg_user_id FROM users WHERE id={user_id} ORDER BY id DESC'
+            sql = f'SELECT {", ".join(User.cols)} FROM {User.table_name} WHERE id={user_id} ORDER BY id DESC'
         elif tg_user_id:
-            sql = f'SELECT id, tg_user_id FROM users WHERE tg_user_id={tg_user_id} ORDER BY id DESC'
+            sql = f'SELECT {", ".join(User.cols)} FROM {User.table_name} WHERE tg_user_id={tg_user_id} ORDER BY id DESC'
         else:
             raise Exception("[ OlegDBAdapter ]: Neither user_id nor tg_user_id specified")
         
         rows = self.db.query(sql)
         if rows:
-            user = User(id = rows[0][0],
-                        tg_user_id = rows[0][1]
-                       )
+            r = rows[0]
+            kwargs = {colname:r[idx] for idx,colname in enumerate(User.cols)}
+            user = User(**kwargs)
         else:
             user = None
             
         return user
 
     def get_user_ids(self):
-        sql = 'SELECT id FROM users ORDER BY id ASC'
+        sql = f'SELECT id FROM {User.table_name} ORDER BY id ASC'
         rows = self.db.query(sql)
         ids = []
         for r in rows:
@@ -72,15 +71,13 @@ class OlegDBAdapter():
 
         # for now it will just fetch all users from DB. If later we add some features to user,
         # we can add selectors for these features
-        sql = f'SELECT id, tg_user_id FROM users'
+        sql = f'SELECT {", ".join(User.cols)} FROM users'
         rows = self.db.query(sql)
 
         users = []
         for r in rows:
-            users.append(User(
-                id = r[0],
-                tg_user_id = r[1]
-            ))
+            kwargs = {colname:r[idx] for idx,colname in enumerate(User.cols)}
+            users.append(User(**kwargs))
         return users
 
     def get_posts(
@@ -149,7 +146,6 @@ class OlegDBAdapter():
                     SELECT internal_post_id FROM user_reactions
                 )
             ''')
-            
 
         if clauses:
             clauses = '\nAND '.join(clauses)
@@ -164,21 +160,16 @@ class OlegDBAdapter():
         else:
             limit = ''
         
-        sql = f'''SELECT id, tg_msg_id, tg_channel_id, tg_timestamp, content_downloaded
-                   FROM posts
+        sql = f'''SELECT {", ".join(Post.cols)}
+                   FROM {Post.table_name}
                    {clauses}
                    ORDER BY id DESC {limit}'''
         rows = self.db.query(sql)
         
         posts = []
-        for row in rows:
-            posts.append(Post(id = row[0],
-                              tg_msg_id = row[1],
-                              tg_channel_id = row[2],
-                              tg_timestamp = row[3],
-                              content_downloaded = row[4]
-                             )
-                        )
+        for r in rows:
+            kwargs = {colname:r[idx] for idx,colname in enumerate(Post.cols)}
+            posts.append(Post(**kwargs))
         return posts
 
     def get_post_ids(self,content_downloaded=None):
@@ -194,7 +185,7 @@ class OlegDBAdapter():
         else:
             clauses = ''
 
-        sql = f'SELECT id FROM posts {clauses} ORDER BY id ASC'
+        sql = f'SELECT id FROM {Post.table_name} {clauses} ORDER BY id ASC'
         #print(sql)
         rows = self.db.query(sql)
         ids = []
@@ -214,9 +205,9 @@ class OlegDBAdapter():
 
         if not posts:
             # insert new post
-            sql = f'''INSERT INTO posts (tg_msg_id, tg_channel_id, tg_timestamp)
-                    VALUES ({post.tg_msg_id}, {post.tg_channel_id}, '{post.tg_timestamp}')'''
-            self.db.push(sql)
+            sql = f'''INSERT INTO {Post.table_name} (tg_msg_id, tg_channel_id, tg_timestamp, timestamp)
+                    VALUES (%s, %s, %s, %s)'''
+            self.db.push(sql,[post.tg_msg_id, post.tg_channel_id, post.tg_timestamp, int(time.time())])
 
             # get newly added post
             new_post = self.get_posts(tg_msg_id = post.tg_msg_id, tg_channel_id = post.tg_channel_id)
@@ -239,7 +230,7 @@ class OlegDBAdapter():
     def get_reactions(self):
         """ returns reaction types as dict of olegtypes.Reaction objects """
 
-        sql = f'SELECT id, emoji, text from reactions'
+        sql = f'SELECT {", ".join(Reaction.cols)} from {Reaction.table_name}'
         rows = self.db.query(sql)
 
         if not rows:
@@ -248,11 +239,8 @@ class OlegDBAdapter():
         
         d = {}
         for r in rows:
-            d[int(r[0])] = Reaction(
-                id = int(r[0]),
-                emoji = r[1],
-                text = r[2]
-            )
+            kwargs = {colname:r[idx] for idx, colname in enumerate(Reaction.cols)}
+            d[r[0]] = Reaction(**kwargs)
         
         return d
 
@@ -265,17 +253,19 @@ class OlegDBAdapter():
         if ur:
             ur = ur[0]
             sql = f'''
-                UPDATE user_reactions
-                SET reaction_id = {reaction}
+                UPDATE {UserReaction.table_name}
+                SET
+                reaction_id = %s,
+                timestamp = %s
                 WHERE id = {ur.id}
             '''
+            self.db.push(sql,[reaction, int(time.time())])
         else:
             sql = f'''
-                INSERT INTO user_reactions (user_id, internal_post_id, reaction_id)
-                VALUES ({user_id}, {post_id}, {reaction})
+                INSERT INTO {UserReaction.table_name} (user_id, internal_post_id, reaction_id, timestamp)
+                VALUES (%s, %s, %s, %s)
             '''
-
-        self.db.push(sql)
+            self.db.push(sql,[user_id, post_id, reaction, int(time.time())])
 
 
     def get_user_reactions(self, user_id=None, internal_post_id=None, learned:bool=None, limit=10000, order = 'DESC'):
@@ -310,7 +300,7 @@ class OlegDBAdapter():
             order = 'DESC'
 
         sql = f'''
-            SELECT id, user_id, internal_post_id, reaction_id, learned FROM user_reactions
+            SELECT {", ".join(UserReaction.cols)} FROM {UserReaction.table_name}
             {clauses}
             ORDER BY id {order}
             LIMIT {limit}
@@ -319,34 +309,21 @@ class OlegDBAdapter():
 
         ur = []
         for r in rows:
-            ur.append(
-                UserReaction(
-                    id = r[0],
-                    user_id = r[1],
-                    internal_post_id = r[2],
-                    reaction_id = r[3],
-                    learned = r[4]
-                )
-            )
+            kwargs = {colname:r[idx] for idx,colname in enumerate(UserReaction.cols)}
+            ur.append(UserReaction(**kwargs))
         return ur
 
-    def delete_post(self,post:Post):
-        ''' deletes given post from OlegDB '''
-
-        sql = f'DELETE FROM posts WHERE id = {post.id}'
-        self.db.push(sql)
-
-    def add_repost(self,post,user):
-        ''' writes information about repost to DB '''
+    def add_repost(self, post, user):
+        ''' writes information about repost to OlegDB '''
 
         repost = self.get_reposts(post.id,user.id)
 
         if not repost:
-            sql = f'INSERT INTO reposts (internal_post_id,user_id) VALUES ({post.id}, {user.id})'
-            self.db.push(sql)
+            sql = f'INSERT INTO {Repost.table_name} (internal_post_id, user_id, timestamp) VALUES (%s, %s, %s)'
+            self.db.push(sql, [post.id, user.id, int(time.time())])
 
     def get_reposts(self,post_id=None,user_id=None,limit=1000):
-        ''' returns list of reposts for given post_id or user_id newest first'''
+        ''' returns list of reposts for given post_id or user_id newest first '''
 
         clauses = []
         if post_id:
@@ -361,17 +338,14 @@ class OlegDBAdapter():
 
         if limit < 0: limit = 1000
         
-        sql = f'SELECT id, internal_post_id, user_id FROM reposts WHERE {clauses} ORDER BY id DESC LIMIT {limit}'
+        sql = f'SELECT {", ".join(Repost.cols)} FROM {Repost.table_name} WHERE {clauses} ORDER BY id DESC LIMIT {limit}'
 
         rows = self.db.query(sql)
 
         reposts = []
-        for row in rows:
-            reposts.append(Repost(
-                id = row[0],
-                internal_post_id = row[1],
-                user_id = row[2]
-            ))
+        for r in rows:
+            kwargs = {colname:r[idx] for idx,colname in enumerate(Repost.cols)}
+            reposts.append(Repost(**kwargs))
             
         return reposts
 
@@ -383,7 +357,7 @@ class OlegDBAdapter():
         return rows[0][0]
 
     def set_reactions_learned(self, ur):
-        """ sets learned=1 in OlegDB.posts for ids """
+        """ sets learned=1 in OlegDB.user_reactions for list of UserReaction """
 
         ids = []
         for r in ur:
@@ -393,13 +367,13 @@ class OlegDBAdapter():
             ids = list(map(str,ids))
             ids = ', '.join(ids)
             sql = f'''
-            UPDATE user_reactions
+            UPDATE {UserReaction.table_name}
             SET learned = true
             WHERE id IN ({ids})
             '''
             self.db.push(sql)
 
-    def get_channel(self, id = None, tg_channel_id = None, listening = True, name = None):
+    def get_channels(self, id = None, tg_channel_id = None, listening = True, name = None):
         """ gets list of channels from OlegDB """
 
         clauses = []
@@ -421,19 +395,13 @@ class OlegDBAdapter():
         else:
             clauses = ''
 
-        sql = f'SELECT id, tg_channel_id, listening, name FROM channels {clauses} ORDER BY id ASC'
+        sql = f'SELECT {", ".join(Channel.cols)} FROM {Channel.table_name} {clauses} ORDER BY id ASC'
         #print(sql)
         rows = self.db.query(sql)
         channels = []
         for r in rows:
-            channels.append(
-                Channel(
-                    id = r[0],
-                    tg_channel_id = r[1],
-                    listening = r[2],
-                    name = r[3]
-                )
-            )
+            kwargs = {colname:r[idx] for idx,colname in enumerate(Channel.cols)}
+            channels.append(Channel(**kwargs))
         return channels
 
     def add_channel(self, channel):
@@ -444,23 +412,24 @@ class OlegDBAdapter():
         Channel that was added or updated
         """
 
-        channels = self.get_channel(tg_channel_id = channel.tg_channel_id)
+        channels = self.get_channels(tg_channel_id = channel.tg_channel_id)
         if not channels:
-            sql = f'INSERT INTO channels (tg_channel_id, listening, name) VALUES (%s, %s, %s)'
+            sql = f'INSERT INTO channels (tg_channel_id, listening, name, timestamp) VALUES (%s, %s, %s, %s)'
         else:
             sql = f'''
             UPDATE channels
             SET
             tg_channel_id = %s,
             listening = %s,
-            name = %s
+            name = %s,
+            timestamp = %s
             WHERE
             id = {channels[0].id}
             '''
 
-        self.db.push(sql,[channel.tg_channel_id, channel.listening, channel.name])
+        self.db.push(sql,[channel.tg_channel_id, channel.listening, channel.name, int(time.time())])
 
-        added = self.get_channel(tg_channel_id = channel.tg_channel_id)[0]
+        added = self.get_channels(tg_channel_id = channel.tg_channel_id)[0]
         
         return added
 

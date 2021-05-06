@@ -8,36 +8,47 @@ class BaseDBObject(SimpleNamespace):
 
 class User(BaseDBObject):
     """ user """
-    pass
+    table_name = 'users'
+    cols = [
+        'id',
+        'tg_user_id',
+        'timestamp',
+        'username',
+    ]
 
 
 class Post(BaseDBObject):
     """ OlegDB post """
-    pass
+    table_name = 'posts'
+    cols = [
+        'id',
+        'tg_msg_id',
+        'tg_channel_id',
+        'tg_timestamp',
+        'content_downloaded',
+        'timestamp'
+    ]
         
-class MessageHandler(SimpleNamespace):
-    """ TDLibUtils messages handler """
-    def __init__(self,
-                 filter,
-                 handler
-                ):
-        self.filter = filter
-        self.handler = handler
-
-class CommandHandler(SimpleNamespace):
-    """ TDLibUtils commands handler """
-    def __init__(self,command,handler,fltr):
-        self.command = command
-        self.handler = handler
-        self.filter = fltr
-
 class Reaction(BaseDBObject):
     """ reaction  """
-    pass
+    table_name = 'reactions'
+    cols = [
+        'id',
+        'emoji',
+        'text',
+    ]
 
 class UserReaction(BaseDBObject):
     """ user's reaction to given post """
-    pass
+    table_name = 'user_reactions'
+    cols = [
+        'id',
+        'user_id',
+        'internal_post_id',
+        'reaction_id',
+        'learned',
+        'timestamp',
+    ]
 
 class Repost(BaseDBObject):
     """ repost"""
@@ -46,12 +57,20 @@ class Repost(BaseDBObject):
     cols = [
         'id',
         'internal_post_id',
-        'user_id'
+        'user_id',
+        'timestamp'
     ]
 
 class Channel(BaseDBObject):
     """ channel """
-    pass
+    table_name = 'channels'
+    cols = [
+        'id',
+        'tg_channel_id',
+        'listening',
+        'name',
+        'timestamp',
+    ]
   
 class ChannelPool(BaseDBObject):
     """ channel from channel_pool """
@@ -71,3 +90,19 @@ class ChannelPool(BaseDBObject):
         'chat_id_failed',
         'joined',
         'error_code']
+
+class MessageHandler(SimpleNamespace):
+    """ TDLibUtils messages handler """
+    def __init__(self,
+                 filter,
+                 handler
+                ):
+        self.filter = filter
+        self.handler = handler
+
+class CommandHandler(SimpleNamespace):
+    """ TDLibUtils commands handler """
+    def __init__(self,command,handler,fltr):
+        self.command = command
+        self.handler = handler
+        self.filter = fltr

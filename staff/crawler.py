@@ -201,9 +201,11 @@ class Joiner(Crawler):
 
     def stop(self):
         if self.running:
+            self.logger.info('Waiting for current task to end')
             self.brake = True
             while self.running:
                 time.sleep(0.1)
+            self.logger.info('Joiner stopped')
 
     def join_chat_list(self):
         """
