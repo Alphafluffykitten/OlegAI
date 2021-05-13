@@ -163,7 +163,9 @@ class Crawler():
             time.sleep(1)
         self.sleep_counter += 1
 
-# TODO: synchronize channel_pool.joined and channel_pool.internal_channel_id
+# TODO: make join_chat_list get each new channel from DB one by one.
+# If we make spider that adds new stuff to pool, it'll be handy. 
+# If no channels are available in the pool, wait say 10 sec and repeat.
 class Joiner(Crawler):
     """
     joins channels from channel_pool

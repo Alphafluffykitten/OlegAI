@@ -111,8 +111,9 @@ class InferDataLoader():
     def get_data(self):
         x_stack = []
         for p in self.posts:
-            # user is always unique here
-            x_stack.append(tensor([self.user2idx[self.user.id],self.post2idx[p.id]]))
+            # only append those posts which are present in vocab
+            if p.id in self.post2idx:
+                x_stack.append(tensor([self.user2idx[self.user.id],self.post2idx[p.id]]))
         x_stack = torch.stack(x_stack)
         self.x_stack = x_stack
 
@@ -318,7 +319,7 @@ class OlegNN():
 
         for c in u_channels:
             # get posts from this channel that were in training dataset
-            ref_posts = self.app.dba.get_posts(tg_channel_id = c, dataset='include', have_content=True, limit=1000)
+            ref_posts = self.app.dba.get_posts(tg_channel_id = c, dataset = 'include', have_content=True, limit=1000)
             channel_emb, channel_bias = self.mean_of_posts(ref_posts)
             # get all posts from this channel that were not in learning dataset
             non_ds_posts = self.app.dba.get_posts(tg_channel_id = c, dataset = 'exclude', have_content=True)

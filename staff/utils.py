@@ -438,7 +438,7 @@ class TDLibUtils():
             return user
 
     def get_username(self, tg_user_id):
-        """ returns username of Telegram user by his TG id """
+        """ returns username of Telegram user by his TG user_id """
 
         data = {
             'user_id': tg_user_id
