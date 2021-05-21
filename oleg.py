@@ -22,10 +22,9 @@ app = OlegApp(
     bot_token = env['bot_token'],
     api_id = env['api_id'],
     api_hash = env['api_hash'],
-    admin_phone = env['admin_phone'],
-    admin_db_encryption_key = env['admin_db_encryption_key'],
+    listener_db_encryption_key = env['listener_db_encryption_key'],
     bot_db_encryption_key = env['bot_db_encryption_key'],
-    admin_files_directory = env['admin_files_directory'],
+    listener_files_directories = env['listener_files_directories'],
     bot_files_directory = env['bot_files_directory'],
     salt = env['salt'],
     logs_dir = env['logs_dir'],
@@ -34,6 +33,7 @@ app = OlegApp(
     nn_new_reactions_threshold = env['nn_new_reactions_threshold'],
     nn_learning_timeout = env['nn_learning_timeout'],
     nn_full_learn_threshold = env['nn_full_learn_threshold'],
+    max_listener_channels = env['max_listener_channels']
 )
 
 
