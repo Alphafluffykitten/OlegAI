@@ -12,6 +12,7 @@ import torch
 import time, datetime
 import os
 import logging
+import gc
 from apscheduler.schedulers.background import BackgroundScheduler
 
 
@@ -882,6 +883,8 @@ class Bot():
         users = self.app.dba.get_users()
         for u in users:
             self._user_send_new(u)
+
+        gc.collect()
         
 
 
