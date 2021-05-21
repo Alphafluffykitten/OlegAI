@@ -112,8 +112,10 @@ class InferDataLoader():
         x_stack = []
         for p in self.posts:
             # only append those posts which are present in vocab
-            if p.id in self.post2idx:
+            try:
                 x_stack.append(tensor([self.user2idx[self.user.id],self.post2idx[p.id]]))
+            except KeyError:
+                pass
         x_stack = torch.stack(x_stack)
         self.x_stack = x_stack
 
@@ -259,7 +261,7 @@ class OlegNN():
         #print(f'{(time.time()-st):.4f} got {len(ur)} reactions')
         
         # DataLoader should provide batches like x.shape = (bs,2) y.shape = (bs,1)
-        dl = DataLoader(ur,self.bs, self.model.user2idx, self.model.post2idx)
+        dl = DataLoader(ur, self.bs, self.model.user2idx, self.model.post2idx)
         self.dl = dl
 
         #print(f'{(time.time()-st):.4f} got dl')

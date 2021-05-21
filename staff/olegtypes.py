@@ -69,9 +69,18 @@ class Channel(BaseDBObject):
         'tg_channel_id',
         'listening',
         'name',
+        'listener_id',
         'timestamp',
     ]
-  
+
+class Listener(BaseDBObject):
+    """ listener """
+    table_name = 'listeners'
+    cols = [
+        'id',
+        'phone',
+    ]
+
 class ChannelPool(BaseDBObject):
     """ channel from channel_pool """
     table_name = 'channel_pool'

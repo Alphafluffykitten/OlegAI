@@ -414,7 +414,7 @@ class OlegDBAdapter():
 
         channels = self.get_channels(tg_channel_id = channel.tg_channel_id)
         if not channels:
-            sql = f'INSERT INTO channels (tg_channel_id, listening, name, timestamp) VALUES (%s, %s, %s, %s)'
+            sql = f'INSERT INTO channels (tg_channel_id, listening, name, listener_id, timestamp) VALUES (%s, %s, %s, %s, %s)'
         else:
             sql = f'''
             UPDATE channels
@@ -422,15 +422,44 @@ class OlegDBAdapter():
             tg_channel_id = %s,
             listening = %s,
             name = %s,
+            listener_id = %s,
             timestamp = %s
             WHERE
             id = {channels[0].id}
             '''
 
-        self.db.push(sql,[channel.tg_channel_id, channel.listening, channel.name, int(time.time())])
+        self.db.push(sql,[channel.tg_channel_id, channel.listening, channel.name, channel.listener_id, int(time.time())])
 
         added = self.get_channels(tg_channel_id = channel.tg_channel_id)[0]
         
         return added
 
+    def get_listeners(self):
+        """ returns dict of Listeners where keys are Listeners' ids """
+
+        sql = f'SELECT {", ".join(Listener.cols)} FROM {Listener.table_name} ORDER BY id ASC'
+
+        rows = self.db.query(sql)
+        listeners = {}
+        for r in rows:
+            kwargs = {colname:r[idx] for idx,colname in enumerate(Listener.cols)}
+            listeners[kwargs['id']] = Listener(**kwargs)
+        return listeners
         
+    def get_listeners_volume(self):
+        """ returns dict where keys are listeners ids, values are this listeners channels qty """
+
+        sql = f'''
+        SELECT
+            L.ID,
+            COUNT(C.LISTENER_ID)
+        FROM LISTENERS L
+        LEFT JOIN CHANNELS C ON C.LISTENER_ID = L.ID
+        GROUP BY L.ID
+        '''
+
+        rows = self.db.query(sql)
+        res = {}
+        for r in rows:
+            res[r[0]] = r[1]
+        return res

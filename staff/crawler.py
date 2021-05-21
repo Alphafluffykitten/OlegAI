@@ -171,9 +171,9 @@ class Joiner(Crawler):
     joins channels from channel_pool
     """
 
-    def __init__(self, dba, admin, logs_dir):
+    def __init__(self, dba, lhub, logs_dir):
         self.dba = dba
-        self.admin = admin
+        self.lhub = lhub
 
         # set up logging
         joiner_logs = os.path.join(logs_dir,'joiner')
@@ -243,7 +243,8 @@ class Joiner(Crawler):
     def get_chat_id(self, c):
         """ Gets telegram chat_id by username """
 
-        res = self.admin.tdutil.search_public_chat(tg_username = c['username'])
+        listener = self.lhub.get_min_listener()
+        res = listener.tdutil.search_public_chat(tg_username = c['username'])
         if not res.error:
             if res.update.get('@type','') == 'chat':
                 chat_id = res.update.get('id', None)
@@ -253,16 +254,19 @@ class Joiner(Crawler):
                 else:
                     return False, res
             else:
-                self.logger.warning(f'Got unexpected update:\n{res.update}')
+                self.logger.warning(f'Got unexpected update from TDLib:\n{res.update}')
         else:
-            self.dba.update_channel(
-                id = c['id'], chat_id_failed = True,
-                error_code = res.error_info['code'],
-                error_info = res.error_info['message']
-            )
             self.logger.error(f"Channel {c['username']} caused error\n {res.error_info}")
             if res.error_info['code'] == 429:
                 self.rate_limit_caught()
+                return False, res
+            
+            self.dba.update_channel(
+                id = c['id'],
+                chat_id_failed = True,
+                error_code = res.error_info['code'],
+                error_info = res.error_info['message']
+            )
 
             return False, res
 
@@ -273,14 +277,15 @@ class Joiner(Crawler):
         by (str): can be 'chat_id' or 'link'
         с (dict): channel from CrawlerDB
         """
+
         if by == 'chat_id':
-            joined, res, channel = self.admin.join_chat_mute(chat_id = c['chat_id'])
+            joined, res, channel = self.lhub.join_chat_mute(chat_id = c['chat_id'])
         elif by == 'link':
-            joined, res, channel = self.admin.join_chat_mute(link = c['link'])
+            joined, res, channel = self.lhub.join_chat_mute(link = c['link'])
         else:
             raise Exception('[ Crawler.join ]: by can be either "chat_id" or "link"')
 
-        if res.error:
+        if getattr(res, 'error', False):
             self.logger.error(f"Channel {c['username']} {c['title']} caused error:\n{res.error_info}")
             self.dba.update_channel(
                 id = c['id'], 
@@ -288,6 +293,8 @@ class Joiner(Crawler):
                 error_info = res.error_info['message'])
             if res.error_info['code'] == 429:
                 self.rate_limit_caught()
+            elif res.error_info['code'] == 1001:
+                self.brake = True
 
         if joined:
             self.dba.update_channel(

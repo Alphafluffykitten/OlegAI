@@ -11,6 +11,7 @@ import hashlib
 import torch
 import time, datetime
 import os
+import logging
 from apscheduler.schedulers.background import BackgroundScheduler
 
 
@@ -18,6 +19,10 @@ def dumps(o):
     return json.dumps(o,indent=4,ensure_ascii=False)
 
 #TODO: smear the whole app with logs
+
+# Error codes:
+# 1001 - all listeners are full
+
 class OlegApp():
     """ superclass composing all inhabitants of the app """
     
@@ -29,10 +34,9 @@ class OlegApp():
                  bot_token,
                  api_id,
                  api_hash,
-                 admin_phone,
-                 admin_db_encryption_key,
+                 listener_db_encryption_key,
                  bot_db_encryption_key,
-                 admin_files_directory,
+                 listener_files_directories,
                  bot_files_directory,
                  salt,
                  logs_dir,
@@ -41,10 +45,12 @@ class OlegApp():
                  nn_new_reactions_threshold,
                  nn_learning_timeout,
                  nn_full_learn_threshold,
-                ):
+                 max_listener_channels,):
 
         self.logs_dir = logs_dir
         self._setup_logs_dir()
+
+        self.logger = self._setup_logging()
         
         self.dba = OlegDBAdapter(db_name,db_user,db_password,db_host)
         self.conv = Converters()
@@ -53,15 +59,14 @@ class OlegApp():
             nn_lpv_len,
             nn_new_reactions_threshold,
             nn_learning_timeout,
-            nn_full_learn_threshold,
-        )
+            nn_full_learn_threshold,)
 
-        self.admin = Admin(
+        self.lhub = ListenerHub(
             api_id = api_id,
             api_hash = api_hash,
-            phone = admin_phone,
-            database_encryption_key = admin_db_encryption_key,
-            files_directory = admin_files_directory,)
+            database_encryption_key = listener_db_encryption_key,
+            files_directory = listener_files_directories,
+            max_listener_channels = int(max_listener_channels))
         
         self.bot = Bot(
             api_id = api_id,
@@ -72,7 +77,7 @@ class OlegApp():
             admin_user_id = admin_user_id,)
 
         self.crawler_db = CrawlerDB(db_name,db_user,db_password,db_host)
-        self.joiner = Joiner(self.crawler_db, self.admin, logs_dir = logs_dir)
+        self.joiner = Joiner(self.crawler_db, self.lhub, logs_dir = logs_dir)
         
         self.scheduler = BackgroundScheduler(timezone = 'Europe/Moscow')
         self.scheduled = self.scheduler.add_job(
@@ -80,12 +85,11 @@ class OlegApp():
             trigger = 'cron',
             hour = '10,12,14,16,19',
             minute = '20',
-            coalesce = True,
-        )
+            coalesce = True,)
 
         # attach OlegApp to sub-objects so they have access to other inhabitants of app
         self.bot.app = self
-        self.admin.app = self
+        self.lhub.app = self
         self.nn.app = self
         self.conv.app = self
 
@@ -95,7 +99,7 @@ class OlegApp():
         
         self.dba.start()
         self.nn.start()
-        self.admin.start()
+        self.lhub.start()
         self.bot.start()
         self.scheduler.start()
         self.crawler_db.start()
@@ -109,51 +113,117 @@ class OlegApp():
         self.crawler_db.stop()
         self.scheduler.shutdown(wait=False)
         self.bot.stop()
-        self.admin.stop()
+        self.lhub.stop()
         self.dba.stop()
 
     def _setup_logs_dir(self):
         if not os.path.isdir(self.logs_dir):
             os.mkdir(self.logs_dir)
 
-        
-        
-class Admin():
-    """ functions to use with admin TDLib account """
-    
-    def __init__(self,
-                 api_id,
-                 api_hash,
-                 phone,
-                 database_encryption_key,
-                 files_directory,
-                ):
-        
-        self.tdutil = TDLibUtils(api_id = api_id,
-                                 api_hash = api_hash,
-                                 phone = phone,
-                                 database_encryption_key = database_encryption_key,
-                                 files_directory = files_directory
-                                )
-        
-        
-        
+    def _setup_logging(self):
+        # set up logging
+        app_logs = os.path.join(self.logs_dir,'app')
+        if 'app' not in os.listdir(self.logs_dir):
+            os.mkdir(app_logs)
+        logger = logging.getLogger('OlegApp')
+        logger.setLevel(logging.DEBUG)
+        c_handler = logging.StreamHandler()
+        f_handler = logging.FileHandler(f'{app_logs}/{len(os.listdir(app_logs))}.txt')
+        c_handler.setLevel(logging.WARNING)
+        f_handler.setLevel(logging.DEBUG)
+        c_format = logging.Formatter(
+            '%(asctime)s %(name)s [%(levelname)s] %(funcName)s:\n %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        c_handler.setFormatter(c_format)
+        f_handler.setFormatter(c_format)
+        logger.addHandler(c_handler)
+        logger.addHandler(f_handler)
+        return logger
+
+
+
+
+class Listener():
+    """ rules listener's TDLib account """
+
+    def __init__(
+        self,
+        api_id,
+        api_hash,
+        phone,
+        database_encryption_key,
+        files_directory,
+        message_handler
+    ):
+
+        self.tdutil = TDLibUtils(
+            api_id = api_id,
+            api_hash = api_hash,
+            phone = phone,
+            database_encryption_key = database_encryption_key,
+            files_directory = files_directory
+        )
+
+        # set message handler
+        self.tdutil.add_message_handler(Filters.all, message_handler)
+
     def start(self):
-        # set admin message handler
-        self.tdutil.add_message_handler(Filters.all, self.new_message_handler)
         
         self.tdutil.start()
-
         self.user_id = self.tdutil.get_me()
-        
 
     def stop(self):
         self.tdutil.stop()
+
+
+
+
+        
+class ListenerHub():
+    """ routes queries to their Listeners """
+    
+    def __init__(
+        self,
+        api_id,
+        api_hash,
+        database_encryption_key,
+        files_directory,
+        max_listener_channels
+    ):
+        self.api_id = api_id
+        self.api_hash = api_hash
+        self.database_encryption_key = database_encryption_key
+        self.files_directory = files_directory
+        self.max_listener_channels = max_listener_channels
+        
+    def start(self):
+
+        # read listeners from DB
+        listeners = self.app.dba.get_listeners()
+
+        # instantiate Listeners, self.ls is dict where keys are listeners DB id
+        self.ls = {}
+        for l in listeners:
+            self.ls[l] = Listener(
+                self.api_id,
+                self.api_hash,
+                listeners[l].phone,
+                self.database_encryption_key,
+                os.path.join(self.files_directory, str(listeners[l].id)),
+                self.new_message_handler
+            )
+            self.ls[l].id = l
+            self.ls[l].start()
+
+    def stop(self):
+        for l in self.ls:
+            self.ls[l].stop()
         
     
     def new_message_handler(self, message):
         """
-        called as new message comes to Admin
+        called as new message comes to one of the Listeners
         checks if message is sent from a chat in a filter, and type supported
         """
         
@@ -190,8 +260,10 @@ class Admin():
 
                 # update embeddings
                 self.app.nn.add_emb(where = 'post', post = post, emb = emb, bias = bias)
+
+                listener = self.get_listener(sender_id)
                 # forward new post to bot, so bot will have access to media
-                res = self.tdutil.forward_post(
+                res = listener.tdutil.forward_post(
                     from_msg_id = post.tg_msg_id,
                     from_channel_id = post.tg_channel_id,
                     to_user_id = self.app.bot.user_id
@@ -226,14 +298,16 @@ class Admin():
         tg_timestamp = message.get('date',0)
 
         # create Post
-        post = Post( tg_msg_id = tg_msg_id,
-                     tg_channel_id = tg_channel_id,
-                     tg_timestamp = tg_timestamp
-                   )
+        post = Post(
+            tg_msg_id = tg_msg_id,
+            tg_channel_id = tg_channel_id,
+            tg_timestamp = tg_timestamp
+        )
         return post
 
     def join_chat_mute(self, chat_id=None, link=None):
         """
+        Selects listener to join.
         Joins chat by chat_id or link and mutes it.
 
         Returns:
@@ -242,12 +316,19 @@ class Admin():
         channel (Channel): if joined, returns this channel as Channel object
         """
 
+        listener, qty = self.get_min_listener(with_qty=True)
+
+        if qty >= self.max_listener_channels:
+            self.app.logger.warning('All listeners are full!')
+            res = SimpleNamespace(error=True, error_info={'code': 1001, 'message': 'All listeners are full'})
+            return False, res, None
+
         if chat_id is not None:
-            result = self.tdutil.join_chat(chat_id)
+            result = listener.tdutil.join_chat(chat_id)
             joined = result.ok_received
         elif link is not None:
             joined = False
-            result = self.tdutil.join_chat_by_link(link)
+            result = listener.tdutil.join_chat_by_link(link)
             if not result.error:
                 chat = result.update
                 chat_id = chat.get('id',0)
@@ -255,14 +336,41 @@ class Admin():
 
         channel = None
         if joined:
-            name = self.tdutil.get_chat_title(chat_id = chat_id)
-            channel = self.app.dba.add_channel(Channel(tg_channel_id = chat_id, listening = True, name = name))
+            name = listener.tdutil.get_chat_title(chat_id = chat_id)
+            channel = self.app.dba.add_channel(Channel(
+                tg_channel_id = chat_id,
+                listening = True,
+                name = name,
+                listener_id = listener.id
+            ))
             time.sleep(1)
-            self.tdutil.mute_chat(chat_id)
+            listener.tdutil.mute_chat(chat_id)
         
         return joined, result, channel
-        
 
+    def get_min_listener(self, with_qty=False):
+        """ returns tuple: listener with minimum channels and qty of his channels """
+
+        lv = self.app.dba.get_listeners_volume()
+        listener = min(lv, key=lv.get)
+        if with_qty:
+            return self.ls[listener], lv[listener]
+        else:
+            return self.ls[listener]
+
+    def get_listener(self, tg_channel_id):
+        """ returns listener for tg_channel_id """
+
+        channel = self.app.dba.get_channels(tg_channel_id = tg_channel_id)
+        if channel:
+            channel = channel[0]
+        else:
+            return None
+
+        lid = channel.listener_id
+        return self.ls[lid]
+
+        
 
 
 
@@ -409,7 +517,7 @@ class TDLibUtils():
         
     
     def send_message(self, message):
-        """ takes TDLib.sendMessage and sends it """
+        """ sends TDLib.sendMessage """
         #print(dumps(message))
         result = self._send_data('sendMessage', message)
         return result
@@ -540,9 +648,15 @@ class Bot():
         self.tdutil.add_command_handler('send_channel',self.send_channels_last)
         self.tdutil.add_command_handler('start_joiner', self.start_joiner_handler, Filters.user(self.admin_user_id))
         self.tdutil.add_command_handler('stop_joiner', self.stop_joiner_handler, Filters.user(self.admin_user_id))
-        self.tdutil.add_message_handler(Filters.forwarded & Filters.user(self.app.admin.user_id), self.got_admin_forward)
         self.tdutil.tg.add_update_handler('updateNewCallbackQuery', self.callback_query_handler)
-        
+
+        # set got_admin_forward handler for every listener
+        for l in self.app.lhub.ls:
+            self.tdutil.add_message_handler(
+                Filters.forwarded & Filters.user(self.app.lhub.ls[l].user_id),
+                self.got_admin_forward
+            )
+
         self.tdutil.start()
 
         self.user_id = self.tdutil.get_me()
@@ -608,7 +722,7 @@ class Bot():
 
         tg_user_id = message.get('chat_id',0)
         user = self.app.dba.get_user(tg_user_id = tg_user_id)
-        post = self.app.dba.get_posts(tg_channel_id = params[0],have_content=True,limit=1)
+        post = self.app.dba.get_posts(tg_channel_id = params[0], have_content=True, limit=1)
         if post:
             post = post[0]
 
@@ -675,14 +789,17 @@ class Bot():
         Returns: if message was found in TDLib, converts it and returns result. Otherwise returns None
         """
 
-        tdmessage = self.app.admin.tdutil.get_post(tg_channel_id=post.tg_channel_id, tg_msg_id=post.tg_msg_id)
+        listener = self.app.lhub.get_listener(post.tg_channel_id)
+        if not listener: return None
+
+        tdmessage = listener.tdutil.get_post(tg_channel_id=post.tg_channel_id, tg_msg_id=post.tg_msg_id)
         if not tdmessage:
             self.app.dba.set_content_downloaded(post, False)
             #print(f'post {post} not found, setting content_downloaded=0')
             return None
 
-        chat_title = self.app.admin.tdutil.get_chat_title(tdmessage)
-        messagelink = self.app.admin.tdutil.get_message_link(tdmessage)
+        chat_title = listener.tdutil.get_chat_title(tdmessage)
+        messagelink = listener.tdutil.get_message_link(tdmessage)
         res = self.app.conv.convert(
             user_id = user.id,
             post_id = post.id,
@@ -695,12 +812,12 @@ class Bot():
 
         
     def got_admin_forward(self,message):
-        """ this is called when bot gets forwarded message from admin user """
+        """ this is called when bot gets forwarded message from listener """
         
         # find original post in OlegDB and flag content_downloaded
 
         # keep in mind that if post was originnaly forwarded to the channel Oleg is subscribed to,
-        # and then forwarded by Admin to Bot, Oleg will not find it in DB, 
+        # and then forwarded by Listener to Bot, Oleg will not find it in DB, 
         # because message's 'forward_info' points to the original post (which is not in Oleg's DB most likely)
 
         tg_msg_id = message.get('forward_info',{}).get('origin',{}).get('message_id',0)
