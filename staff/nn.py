@@ -251,13 +251,14 @@ class OlegNN():
         dl = None
 
         # add some shuffle to result
-        preds = self.shuffle(preds,amount=0.01)
+        preds = self.shuffle(preds,amount=0.1)
         self.inf_preds = preds
         topidx = torch.argmax(preds).item()
         v_post_id = x[topidx][1]
 
         for post in posts:
             if post.id == self.model.idx2post[v_post_id]:
+                posts = None
                 return post
 
     def got_new_reaction(self):
@@ -331,6 +332,7 @@ class OlegNN():
         # set learned=1 for reactions in dl
         self.app.dba.set_reactions_learned(ur)
 
+        ur = None
         dl = None
 
         self.learning = False
