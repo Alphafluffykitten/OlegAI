@@ -42,7 +42,10 @@ class OlegApp():
                  salt,
                  logs_dir,
                  admin_user_id,
-                 nn_lpv_len,
+                 nn_user_lpv_len,
+                 nn_post_lpv_len,
+                 nn_channel_lpv_len,
+                 nn_hidden_layer,
                  nn_new_reactions_threshold,
                  nn_learning_timeout,
                  nn_full_learn_threshold,
@@ -57,7 +60,10 @@ class OlegApp():
         self.conv = Converters()
         self.hash = OlegHashing(salt = salt, trunc = 7)
         self.nn = OlegNN(
-            nn_lpv_len,
+            nn_user_lpv_len,
+            nn_post_lpv_len,
+            nn_channel_lpv_len,
+            nn_hidden_layer,
             nn_new_reactions_threshold,
             nn_learning_timeout,
             nn_full_learn_threshold,)
@@ -212,7 +218,7 @@ class ListenerHub():
                 listeners[l].phone,
                 self.database_encryption_key,
                 os.path.join(self.files_directory, str(listeners[l].id)),
-                self.new_message_handler
+                self.handle_new_message
             )
             self.ls[l].id = l
             self.ls[l].start()
@@ -222,7 +228,7 @@ class ListenerHub():
             self.ls[l].stop()
         
     
-    def new_message_handler(self, message):
+    def handle_new_message(self, message):
         """
         called as new message comes to one of the Listeners
         checks if message is sent from a chat in a filter, and type supported
@@ -245,22 +251,12 @@ class ListenerHub():
             if (self._listening(sender_id)) and (self._type_supported(message)):
                 #print('chat listening and type supported ok')
 
-                # check for emb from previous post from this channel
-                prev = self.app.dba.get_posts(tg_channel_id = sender_id, have_content=True, limit = 100)
-                emb = None
-                if prev:
-                    emb, bias = self.app.nn.mean_of_posts(prev)
-                    #print('got existing emb: ', emb[:5], bias,sep='\n')
-                if not isinstance(emb,torch.Tensor):
-                    emb = self.app.nn.get_init_emb()
-                    bias = torch.tensor([0])
-
                 # write new post to OlegDB
                 post = self._prepare_oleg_post(message)
                 post = self.app.dba.add_post(post)
 
-                # update embeddings
-                self.app.nn.add_emb(where = 'post', post = post, emb = emb, bias = bias)
+                # add new post to model
+                self.app.nn.handle_new_obj(where='post', obj=post)
 
                 listener = self.get_listener(sender_id)
                 # forward new post to bot, so bot will have access to media
@@ -344,6 +340,7 @@ class ListenerHub():
                 name = name,
                 listener_id = listener.id
             ))
+            self.app.nn.handle_new_obj('channel', channel)
             time.sleep(1)
             listener.tdutil.mute_chat(chat_id)
         
@@ -627,7 +624,8 @@ class Bot():
         bot_token,
         database_encryption_key,
         files_directory,
-        admin_user_id,):
+        admin_user_id,
+    ):
         
         self.tdutil = TDLibUtils(
             api_id = api_id,
@@ -676,11 +674,9 @@ class Bot():
             username = self.tdutil.get_username(tg_user_id)
             # if there is no such user in OlegDB
             if not self.app.dba.get_user(tg_user_id = tg_user_id):
-                emb = self.app.nn.get_init_emb()
                 user = self.app.dba.register_user(tg_user_id, username)
                 if user:
-                    # add user embedding and bias to nn
-                    self.app.nn.add_emb(where = 'user', user = user, emb = emb, bias = torch.tensor([0]))
+                    self.app.nn.handle_new_obj('user', user)
                     self.user_bootstrap(user)
                     self._user_send_new(user)
                     
@@ -701,13 +697,14 @@ class Bot():
             text='Ставьте 👍 или 💩, я обучаюсь на ваших оценках'
         )
         res.wait()
-        time.sleep(2)
+        time.sleep(3)
         
     def start_handler(self, message, params):
         """ on /start """
-
-        tg_user_id = message.get('chat_id',0)
         
+        pass
+
+        #tg_user_id = message.get('chat_id',0)
         #self.tdutil.tg.send_message(chat_id=tg_user_id, text='Hi!')
         
     
@@ -747,29 +744,17 @@ class Bot():
         ten_days_ago = (datetime.datetime.now() - datetime.timedelta(days=10)).timestamp()
         # if post's not found in TDLib, delete it, try 10 times, if fails, just pass
         for i in range(10):
-            # if user is fresh, feed him posts with highest bias (sweetest shit we have)
-            if self.app.dba.count_reposts(user) < 30:
-                max_bias_posts = self.app.dba.get_posts(ids=self.app.nn.get_max_bias())
-                # get max biased post that havent been reposted to this user
-                for p in max_bias_posts:
-                    if (
-                        (not self.app.dba.get_reposts(post_id = p.id, user_id=user.id))
-                        and (p.content_downloaded)
-                    ):
-                        break
-                filtered = p
-            else:
-                # select posts within last 10 days
-                posts = self.app.dba.get_posts(
-                    have_content = True,
-                    except_user = user.id,
-                    tg_timestamp_range = (ten_days_ago, time.time())
-                )
-                if not posts:
-                    self.tdutil.tg.send_message(chat_id=user.tg_user_id, text='No new messages :(')
-                    return
+            # select posts within last 10 days
+            posts = self.app.dba.get_posts(
+                have_content = True,
+                except_user = user.id,
+                tg_timestamp_range = (ten_days_ago, time.time())
+            )
+            if not posts:
+                self.tdutil.tg.send_message(chat_id=user.tg_user_id, text='No new messages :(')
+                return
 
-                filtered = self.app.nn.closest(posts,user)
+            filtered = self.app.nn.closest(posts,user)
 
             to_send = self._prepare_message(user, filtered)
             if to_send: break
@@ -918,7 +903,8 @@ class Converters():
         if content_type in self.supported:
             result = getattr(self, content_type)(message)
         else:
-            raise Exception(f'[ Converters.convert ]: Content @type {content_type} not supported')
+            #raise Exception(f'[ Converters.convert ]: Content @type {content_type} not supported')
+            return False
         
         result['chat_id'] = tg_user_id
         result = self._append_inline_keyboard(result,user_id,post_id)

@@ -268,7 +268,15 @@ class OlegDBAdapter():
             self.db.push(sql,[user_id, post_id, reaction, int(time.time())])
 
 
-    def get_user_reactions(self, user_id=None, internal_post_id=None, learned:bool=None, limit=10000, order = 'DESC'):
+    def get_user_reactions(
+        self,
+        user_id=None,
+        internal_post_id=None,
+        learned:bool=None,
+        limit=None,
+        order = 'RANDOM',
+        with_channels=False
+    ):
         """
         gets OlegDB.user_reactions as list of olegtypes.UserReaction
         
@@ -277,39 +285,61 @@ class OlegDBAdapter():
         internal_post_id: int
         learned: bool
         limit: int. Default = 10000
-        order: str. Default = 'desc' (newest first). Can be 'asc' or 'desc'
+        order: str. Default = 'random' (newest first). Can be 'asc' or 'desc' or 'random'
+        with_channels: bool. If True, joins OlegDB.posts.tg_channel_id
         """
 
         clauses = []
         if user_id:
-            clauses.append(f'user_id = {user_id}\n')
+            clauses.append(f'ur.user_id = {user_id}\n')
         if internal_post_id:
-            clauses.append(f'internal_post_id = {internal_post_id}\n')
+            clauses.append(f'ur.internal_post_id = {internal_post_id}\n')
         if learned is not None:
-            clauses.append(f'learned = {bool(learned)}\n')
+            clauses.append(f'ur.learned = {bool(learned)}\n')
 
         clauses = ' AND\n'.join(clauses)
         if clauses:
             clauses = 'WHERE\n'+clauses
 
-        if limit<0:
-            limit = 10000
+
+        if limit is not None:
+            limit= f'LIMIT {limit}'
+        else:
+            limit = ''
 
         order = order.upper()
-        if order not in ('ASC', 'DESC'):
-            order = 'DESC'
+        if order not in ('ASC', 'DESC', 'RANDOM'):
+            order = 'RANDOM'
+        if order == 'RANDOM':
+            order = 'RANDOM()'
+        elif order == 'ASC':
+            order = 'ur.id ASC'
+        elif order == 'DESC':
+            order = 'ur.id DESC'
+        
+        suf_cols = []
+        cols = UserReaction.cols.copy()
+        for i in range(len(cols)):
+            suf_cols.append(f'ur.{cols[i]}')
+
+        join_clause = ''
+        if with_channels:
+            join_clause = f'LEFT JOIN {Post.table_name} p ON ur.internal_post_id = p.id'
+            cols.append('tg_channel_id')
+            suf_cols.append('p.tg_channel_id')
 
         sql = f'''
-            SELECT {", ".join(UserReaction.cols)} FROM {UserReaction.table_name}
+            SELECT {", ".join(suf_cols)} FROM {UserReaction.table_name} ur
+            {join_clause}
             {clauses}
-            ORDER BY id {order}
-            LIMIT {limit}
+            ORDER BY {order}
+            {limit}
         '''
-        rows = self.db.query(sql)
 
+        rows = self.db.query(sql)
         ur = []
         for r in rows:
-            kwargs = {colname:r[idx] for idx,colname in enumerate(UserReaction.cols)}
+            kwargs = {colname:r[idx] for idx,colname in enumerate(cols)}
             ur.append(UserReaction(**kwargs))
         return ur
 
@@ -403,6 +433,17 @@ class OlegDBAdapter():
             kwargs = {colname:r[idx] for idx,colname in enumerate(Channel.cols)}
             channels.append(Channel(**kwargs))
         return channels
+
+    def get_tg_channel_ids(self):
+        """ Returns list of channels' tg_channel_id """
+
+        sql = f'SELECT tg_channel_id FROM {Channel.table_name} ORDER BY id ASC'
+        rows = self.db.query(sql)
+        ids = []
+        for r in rows:
+            ids.append(r[0])
+        return ids
+
 
     def add_channel(self, channel):
         """

@@ -198,8 +198,11 @@ class Joiner(Crawler):
 
 
     def start(self):
-        self.logger.info('Starting Joiner')
-        threading.Thread(target=self.join_chat_list).start()
+        if not self.running:
+            self.logger.info('Starting Joiner')
+            threading.Thread(target=self.join_chat_list).start()
+        else:
+            self.logger.info('Joiner already running')
 
     def stop(self):
         if self.running:
@@ -294,6 +297,7 @@ class Joiner(Crawler):
             if res.error_info['code'] == 429:
                 self.rate_limit_caught()
             elif res.error_info['code'] == 1001:
+                self.logger.warning('Maximum number of channels for all listeners reached')
                 self.brake = True
 
         if joined:
