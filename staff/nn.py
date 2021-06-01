@@ -189,9 +189,10 @@ class OlegNN():
         post_lpv_len,
         channel_lpv_len,
         n_hidden,                   # hidden layer neurons qty
-        nn_new_reactions_threshold, # how many new reactions to start incremental learning cycle
-        nn_learning_timeout,        # min interval between learning cycles, seconds
-        nn_full_learn_threshold,    # how many incremental learning cycles to start a full learning cycle
+        new_reactions_threshold,    # how many new reactions to start incremental learning cycle
+        learning_timeout,           # min interval between learning cycles, seconds
+        full_learn_threshold,       # how many incremental learning cycles to start a full learning cycle
+        closest_shuffle,            # shuffle amount of prediction result
     ):
     
         self.user_lpv_len = int(user_lpv_len)
@@ -200,9 +201,10 @@ class OlegNN():
 
         self.n_hidden = int(n_hidden)
 
-        self.new_reactions_threshold = int(nn_new_reactions_threshold)
-        self.learning_timeout = int(nn_learning_timeout)
-        self.full_learn_threshold = int(nn_full_learn_threshold)
+        self.new_reactions_threshold = int(new_reactions_threshold)
+        self.learning_timeout = int(learning_timeout)
+        self.full_learn_threshold = int(full_learn_threshold)
+        self.closest_shuffle = float(closest_shuffle)
 
         self.new_reactions_counter = 0      # new reactions since last learning cycle
         self.inc_cycles = 0                 # how many incremental cycles have passed since last full cycle
@@ -251,7 +253,7 @@ class OlegNN():
         dl = None
 
         # add some shuffle to result
-        preds = self.shuffle(preds,amount=0.1)
+        preds = self.shuffle(preds,amount=self.closest_shuffle)
         self.inf_preds = preds
         topidx = torch.argmax(preds).item()
         v_post_id = x[topidx][1]
@@ -371,6 +373,10 @@ class OlegNN():
         return avg_loss
 
     def learn_validate(self):
+        """
+        Cuts user reactions dataset into training and validation ds, then does learning and validation
+        for each epoch, prints losses
+        """
 
         self.init_model()
 
@@ -385,13 +391,13 @@ class OlegNN():
         
         self.l_epoch_losses = []
         self.v_epoch_losses = []
-        print('Epoch | l_loss | v_loss')
+        print('Epoch | learn_loss | valid_loss')
         for e in range(self.full_learn_epochs):
             l_loss = self._learn(dl_l, self.model)
             self.l_epoch_losses.append(l_loss)
             v_loss = self._validate(dl_v, self.model)
             self.v_epoch_losses.append(v_loss)
-            print(f'{e:5} | {round(l_loss,3):6} | {round(v_loss,3):6}')
+            print(f'{e:5} | {round(l_loss,3):10} | {round(v_loss,3):10}')
 
     def shuffle(self, t:torch.Tensor, amount=0.05):
         """ adds shuffle to input tensor """

@@ -90,7 +90,7 @@ class OlegDBAdapter():
         ids (list:int, optional): post ids to look among
         exc_ids (list:int, optional): post ids to exclude
         dataset (str, optional): can be 'include', 'exclude' or None. If 'include' then only selects from posts
-            that present in user_reactions table. If 'exclude', excludes these posts from select
+        that present in user_reactions table. If 'exclude', excludes these posts from select
         tg_msg_id (int, optional): tg_msg_id to search for
         tg_channel_id (int,optional): tg_channel_id to search for
         have_content (bool, optional): if flagged, searches only for content_downloaded=1
@@ -222,8 +222,7 @@ class OlegDBAdapter():
         sql = f'''
             UPDATE posts
             SET content_downloaded = {bool(cd)}
-            WHERE
-                id = {post.id}
+            WHERE id = {post.id}
         '''
         self.db.push(sql)
 

@@ -49,6 +49,7 @@ class OlegApp():
                  nn_new_reactions_threshold,
                  nn_learning_timeout,
                  nn_full_learn_threshold,
+                 nn_closest_shuffle,
                  max_listener_channels,):
 
         self.logs_dir = logs_dir
@@ -66,7 +67,8 @@ class OlegApp():
             nn_hidden_layer,
             nn_new_reactions_threshold,
             nn_learning_timeout,
-            nn_full_learn_threshold,)
+            nn_full_learn_threshold,
+            nn_closest_shuffle,)
 
         self.lhub = ListenerHub(
             api_id = api_id,
@@ -770,7 +772,7 @@ class Bot():
 
     def _prepare_message(self,user,post):
         """
-        prepares tdmessage for sending (name, converters etc)
+        Prepares tdmessage for sending (name, converters etc)
 
         Returns: if message was found in TDLib, converts it and returns result. Otherwise returns None
         """
@@ -869,8 +871,6 @@ class Bot():
         for u in users:
             self._user_send_new(u)
 
-        gc.collect()
-        
 
 
 
