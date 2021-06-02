@@ -142,6 +142,7 @@ class DataLoader():
 
         return x_stack, y_stack
 
+# DELETE abandoned
 class InferDataLoader():
     """ data loader for inferring """
 
@@ -244,24 +245,48 @@ class OlegNN():
         #    idx2post
         #)
 
-    def closest(self,posts,user):
-        """ returns post closest to user """
+    def closest(self, posts, user, offset=0):
+        """
+        Returns post closest to user
+        
+        Args:
+        posts (list:Post): list of posts
+        user (User): user to infer closest post for
+        offset (int, default=0): will return top-offset post
+        """
 
-        dl = InferDataLoader(posts, user, self.model.user2idx, self.model.post2idx, self.model.channel2idx)
-        x = dl.get_data()
+        x = self.get_infer_data(posts, user)
         preds = self.model.forward(x)
-        dl = None
 
         # add some shuffle to result
-        preds = self.shuffle(preds,amount=self.closest_shuffle)
+        preds = self.shuffle(preds, amount=self.closest_shuffle)
         self.inf_preds = preds
-        topidx = torch.argmax(preds).item()
+        topidx = torch.topk(preds, offset+1).indices.tolist()[offset]
         v_post_id = x[topidx][1]
 
         for post in posts:
             if post.id == self.model.idx2post[v_post_id]:
-                posts = None
                 return post
+
+    def get_infer_data(self,posts,user):
+        """ Returns tensor of vocabularized indexes for inference """
+
+        x_stack = []
+        for p in posts:
+            # only append those posts which are present in vocab
+            try:
+                x_stack.append(
+                    tensor([
+                        self.model.user2idx[user.id],
+                        self.model.post2idx[p.id],
+                        self.model.channel2idx[p.tg_channel_id]
+                    ])
+                )
+            except KeyError:
+                pass
+        x_stack = torch.stack(x_stack)
+
+        return x_stack
 
     def got_new_reaction(self):
         """
@@ -427,25 +452,32 @@ class OlegNN():
         fwd_voc = f'idx2{where}'
         bkwd_voc = f'{where}2idx'
 
-        # add emb to embedding matrix
-        if obj.id not in getattr(self.model, bkwd_voc):
-            emb_rows = getattr(self.model, embname).weight.shape[0]
+        # DEBUG
+        self.app.debug.nn_obj = obj
 
-            # add row to emb
-            setattr(
-                self.model, embname,
-                nn.Embedding.from_pretrained(
-                    torch.cat(
-                        (getattr(self.model, embname).weight.detach(), emb),
-                        dim=0
+        # add emb to embedding matrix
+        try:
+            if obj.id not in getattr(self.model, bkwd_voc):
+                emb_rows = getattr(self.model, embname).weight.shape[0]
+
+                # add row to emb
+                setattr(
+                    self.model, embname,
+                    nn.Embedding.from_pretrained(
+                        torch.cat(
+                            (getattr(self.model, embname).weight.detach(), emb),
+                            dim=0
+                        )
                     )
                 )
-            )
-            getattr(self.model, embname).weight.requires_grad_(True)
+                getattr(self.model, embname).weight.requires_grad_(True)
 
-            # add value to vocab
-            getattr(self.model, fwd_voc).append(obj.id)
-            getattr(self.model, bkwd_voc)[obj.id] = emb_rows
+                # add value to vocab
+                getattr(self.model, fwd_voc).append(obj.id)
+                getattr(self.model, bkwd_voc)[obj.id] = emb_rows
+        except AttributeError as e:
+            print (self.app.debug)
+            raise e
 
         self.learning = False
 
@@ -455,6 +487,8 @@ class OlegNN():
         voc = ['user', 'post', 'channel']
         if where not in voc:
             raise Exception(f'[ OlegNN.handle_new_obj ]: where attribute incorrect: {where}')
+
+        
         
         embname = f'{where}_lpv_len'
         emb = torch.randn(getattr(self, embname))

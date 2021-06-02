@@ -170,6 +170,10 @@ class OlegDBAdapter():
         for r in rows:
             kwargs = {colname:r[idx] for idx,colname in enumerate(Post.cols)}
             posts.append(Post(**kwargs))
+
+        # DEBUG
+        self.app.debug.dba_sql = sql
+        self.app.debug.dba_posts = posts
         return posts
 
     def get_post_ids(self,content_downloaded=None):
@@ -205,14 +209,16 @@ class OlegDBAdapter():
 
         if not posts:
             # insert new post
-            sql = f'''INSERT INTO {Post.table_name} (tg_msg_id, tg_channel_id, tg_timestamp, timestamp)
-                    VALUES (%s, %s, %s, %s)'''
+            sql = f'''
+                INSERT INTO {Post.table_name} (tg_msg_id, tg_channel_id, tg_timestamp, timestamp)
+                VALUES (%s, %s, %s, %s)
+            '''
             self.db.push(sql,[post.tg_msg_id, post.tg_channel_id, post.tg_timestamp, int(time.time())])
 
             # get newly added post
             new_post = self.get_posts(tg_msg_id = post.tg_msg_id, tg_channel_id = post.tg_channel_id)
-            if not new_post:
-                raise Exception(f'[ OlegDBAdapter ]: Couldn\'t add new post to DB')
+            if not new_post[0]:
+                raise Exception(f'[ OlegDBAdapter ]: Couldn\'t add new post to DB, {new_post}')
 
             return new_post[0]
 

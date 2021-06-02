@@ -96,12 +96,14 @@ class OlegApp():
             minute = '20',
             coalesce = True,)
 
+        self.debug = SimpleNamespace()
+
         # attach OlegApp to sub-objects so they have access to other inhabitants of app
         self.bot.app = self
         self.lhub.app = self
         self.nn.app = self
         self.conv.app = self
-
+        self.dba.app = self
 
     def start(self):
         """ should be called before anything """
@@ -255,10 +257,13 @@ class ListenerHub():
 
                 # write new post to OlegDB
                 post = self._prepare_oleg_post(message)
+                #DEBUG
+                self.app.debug.lhub_post = post
                 post = self.app.dba.add_post(post)
+                self.app.debug.lhub_post1 = post
 
                 # add new post to model
-                self.app.nn.handle_new_obj(where='post', obj=post)
+                self.app.nn.handle_new_obj(where='post', obj = post)
 
                 listener = self.get_listener(sender_id)
                 # forward new post to bot, so bot will have access to media
@@ -680,7 +685,7 @@ class Bot():
                 if user:
                     self.app.nn.handle_new_obj('user', user)
                     self.user_bootstrap(user)
-                    self._user_send_new(user)
+                    self._users_send_new([user])
                     
     def user_bootstrap(self, user):
         """ routine for newly registered user """
@@ -715,7 +720,7 @@ class Bot():
         
         tg_user_id = message.get('chat_id',0)
         user = self.app.dba.get_user(tg_user_id=tg_user_id)
-        self._user_send_new(user)
+        self._users_send_new([user])
 
     def send_channels_last(self, message, params):
         """ sends last post from given channel to user from which message was received """
@@ -740,35 +745,37 @@ class Bot():
     def stop_joiner_handler(self, message, params):
         self.app.joiner.stop()
 
-    def _user_send_new(self, user:User):
-        """ selects post from pool of unseen and sends it to user_id """
+    def _users_send_new(self, users):
+        """ For each user calls nn.closest and sends best post """
 
         ten_days_ago = (datetime.datetime.now() - datetime.timedelta(days=10)).timestamp()
-        # if post's not found in TDLib, delete it, try 10 times, if fails, just pass
-        for i in range(10):
-            # select posts within last 10 days
-            posts = self.app.dba.get_posts(
-                have_content = True,
-                except_user = user.id,
-                tg_timestamp_range = (ten_days_ago, time.time())
-            )
-            if not posts:
-                self.tdutil.tg.send_message(chat_id=user.tg_user_id, text='No new messages :(')
-                return
+        posts = self.app.dba.get_posts(
+            have_content = True,
+            tg_timestamp_range = (ten_days_ago, time.time())
+        )
+        if not posts:
+            #self.tdutil.tg.send_message(chat_id=user.tg_user_id, text='No new messages :(')
+            self.app.logger.warning('[ Bot._users_send_new ]: No messages found')
+            return
 
-            filtered = self.app.nn.closest(posts,user)
+        for u in users:
+            to_send = None
+            for i in range(100):
+                filtered = self.app.nn.closest(posts, u, offset=i)
+                # try to find post that havent been reposted
+                if not self.app.dba.get_reposts(filtered.id, u.id):
+                    to_send = self._prepare_message(u, filtered)
+                    # check if it's still there
+                    if to_send:
+                        break
+            if to_send: 
+                res = self.tdutil.send_message(to_send)
+                if res.error:
+                    self.app.logger.error('[ Bot._users_send_new ] '+str(res.error_info))
 
-            to_send = self._prepare_message(user, filtered)
-            if to_send: break
+                # write reposted info to OlegDB.reposts
+                self.app.dba.add_repost(filtered, u)
 
-        if not to_send: return
-
-        res = self.tdutil.send_message(to_send)
-        if res.error:
-            print(res.error_info)
-
-        # write reposted info to OlegDB.reposts
-        self.app.dba.add_repost(filtered,user)
 
     def _prepare_message(self,user,post):
         """
@@ -849,7 +856,7 @@ class Bot():
         self.app.dba.update_reaction(user_id, post_id, reaction_id)
         #self.edit_inline_keyboard(user_id,post_id, reaction_id)
         self.tdutil.answer_callback_query(query_id = query_id, text = self.reactions[reaction_id].text)
-        self._user_send_new(self.app.dba.get_user(user_id=user_id))
+        self._users_send_new([self.app.dba.get_user(user_id=user_id)])
         self.app.nn.got_new_reaction()
 
     def got_callback_command(self, payload, query_id):
@@ -861,15 +868,14 @@ class Bot():
         user = self.app.dba.get_user(user_id = user_id)
 
         if command == 'send_new':
-            self._user_send_new(user)
+            self._users_send_new([user])
             self.tdutil.answer_callback_query(query_id = query_id, text = 'Here you go')
 
     def scheduled_mailing(self):
-        """ this is called when scheduled time of mass mailing of new posts come """
+        """ This is called when scheduled time of mass mailing come """
 
         users = self.app.dba.get_users()
-        for u in users:
-            self._user_send_new(u)
+        self._users_send_new(users)
 
 
 
