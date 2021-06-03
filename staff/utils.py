@@ -114,8 +114,6 @@ class OlegApp():
         self.bot.start()
         self.scheduler.start()
         self.crawler_db.start()
-
-        
         
     def stop(self):
         """ graceful shutdown """
@@ -132,7 +130,7 @@ class OlegApp():
             os.mkdir(self.logs_dir)
 
     def _setup_logging(self):
-        # set up logging
+        
         app_logs = os.path.join(self.logs_dir,'app')
         if 'app' not in os.listdir(self.logs_dir):
             os.mkdir(app_logs)
@@ -213,7 +211,7 @@ class ListenerHub():
         # read listeners from DB
         listeners = self.app.dba.get_listeners()
 
-        # instantiate Listeners, self.ls is dict where keys are listeners DB id
+        # instantiate Listeners, self.ls is dict where keys are Listener.id
         self.ls = {}
         for l in listeners:
             self.ls[l] = Listener(
@@ -273,7 +271,7 @@ class ListenerHub():
                     to_user_id = self.app.bot.user_id
                 )
                 if res.error:
-                    print(res.error_info)
+                    self.app.logger.error(res.error_info)
 
     def _type_supported(self, message):
         """ takes TDLib.message and checks if type of content is supported by OlegAI """
@@ -403,8 +401,7 @@ class TDLibUtils():
                            database_encryption_key = database_encryption_key,
                            bot_token = bot_token,
                            phone = phone,
-                           files_directory = files_directory
-                          )
+                           files_directory = files_directory)
         
         # listen to any update.message and pass it to update_handler
         self.tg.add_message_handler(self.update_handler)
@@ -492,7 +489,7 @@ class TDLibUtils():
                }
         result = self._send_data('getMessage', data)
         if result.error:
-            print(result.error_info)
+            self.app.logger.error(result.error_info)
 
         if result.update:
             return result.update
@@ -735,7 +732,7 @@ class Bot():
 
             res = self.tdutil.send_message(to_send)
             if res.error:
-                print(res.error_info)
+                self.app.logger.error(res.error_info)
         else:
             res = self.tdutil.tg.send_message(chat_id=user.tg_user_id, text=f'No posts found from channel {params[0]}')
 

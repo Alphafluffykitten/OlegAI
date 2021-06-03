@@ -455,8 +455,8 @@ class OlegNN():
         # DEBUG
         self.app.debug.nn_obj = obj
 
-        # add emb to embedding matrix
-        try:
+        try: #DEBUG
+            # add emb to embedding matrix
             if obj.id not in getattr(self.model, bkwd_voc):
                 emb_rows = getattr(self.model, embname).weight.shape[0]
 
