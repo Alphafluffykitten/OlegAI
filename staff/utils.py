@@ -352,7 +352,10 @@ class ListenerHub():
         return joined, result, channel
 
     def get_min_listener(self, with_qty=False):
-        """ returns tuple: listener with minimum channels and qty of his channels """
+        """
+        Returns listener with minimum channels.
+        If with_qty=True, returns tuple (listener, qty of his channels)
+        """
 
         lv = self.app.dba.get_listeners_volume()
         listener = min(lv, key=lv.get)
@@ -362,7 +365,7 @@ class ListenerHub():
             return self.ls[listener]
 
     def get_listener(self, tg_channel_id):
-        """ returns listener for tg_channel_id """
+        """ Returns listener for tg_channel_id """
 
         channel = self.app.dba.get_channels(tg_channel_id = tg_channel_id)
         if channel:
@@ -389,7 +392,7 @@ class TDLibUtils():
                  database_encryption_key,
                  phone=None,
                  bot_token=None,
-                 files_directory=None
+                 files_directory=None,
                 ):
         
         self._command_handlers = []
@@ -489,7 +492,8 @@ class TDLibUtils():
                }
         result = self._send_data('getMessage', data)
         if result.error:
-            self.app.logger.error(result.error_info)
+            #print(result.error_info)
+            pass
 
         if result.update:
             return result.update
@@ -642,7 +646,7 @@ class Bot():
         
     def start(self):
         
-        # this executes upon receiving any update from TDLib
+        # this executes upon receiving any update.message from TDLib
         self.tdutil.greeting = self.user_greeting
 
         # set bot handlers
@@ -835,7 +839,7 @@ class Bot():
                 self.got_callback_reaction(payload, query_id = update.get('id',0))
             elif route == 'COMMAND':
                 self.got_callback_command(payload, query_id = update.get('id',0))
-        else: 
+        else:
             self.tdutil.answer_callback_query(query_id = update.get('id',0), text = 'No-no-no...')
 
     def edit_inline_keyboard(self, user_id, post_id, reaction_id):
@@ -1112,9 +1116,9 @@ class OlegHashing():
         ''' hashes string, appends truncated hash, and converts to base-64 encoded string '''
 
         data = self.hash_with_salt(s)
-        data = data.encode('ascii') #string with truncated hash goes to payload
+        data = data.encode('ascii')   #string with truncated hash goes to payload
         data = base64.b64encode(data) #encode bytes to base64 bytes
-        data = data.decode('ascii') #decode base64 bytes to ascii representation
+        data = data.decode('ascii')   #decode base64 bytes to ascii representation
 
         return data
 

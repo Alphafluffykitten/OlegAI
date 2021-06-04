@@ -476,7 +476,7 @@ class OlegNN():
                 getattr(self.model, fwd_voc).append(obj.id)
                 getattr(self.model, bkwd_voc)[obj.id] = emb_rows
         except AttributeError as e:
-            print (self.app.debug)
+            self.app.logger.error(self.app.debug)
             raise e
 
         self.learning = False

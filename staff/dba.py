@@ -219,7 +219,10 @@ class OlegDBAdapter():
             new_post = self.get_posts(tg_msg_id = post.tg_msg_id, tg_channel_id = post.tg_channel_id)
             if not new_post[0]:
                 raise Exception(f'[ OlegDBAdapter ]: Couldn\'t add new post to DB, {new_post}')
-
+            
+            #DEBUG
+            self.app.debug.new_post = new_post[0]
+            
             return new_post[0]
 
     def set_content_downloaded(self, post: Post, cd=1):
