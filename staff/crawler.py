@@ -183,7 +183,7 @@ class Joiner(Crawler):
         logger.setLevel(logging.DEBUG)
         c_handler = logging.StreamHandler()
         f_handler = logging.FileHandler(f'{joiner_logs}/{len(os.listdir(joiner_logs))}.txt')
-        c_handler.setLevel(logging.WARNING)
+        c_handler.setLevel(logging.DEBUG)
         f_handler.setLevel(logging.DEBUG)
         c_format = logging.Formatter(
             '%(asctime)s %(name)s [%(levelname)s] %(funcName)s:\n %(message)s',

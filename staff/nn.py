@@ -4,42 +4,7 @@ import random
 import time
 import threading
 from staff.olegtypes import *
-
-class DotProduct(nn.Module):
-    """ Dot product model for learning """
-
-    def __init__(self, user_emb, user_bias, post_emb, post_bias, idx2user, idx2post):
-        """
-        Args:
-        user_emb, user_bias, post_emb, post_bias are tuples denoting dimensions of nn.Embedding
-        idx2user, idx2post - lists where elements are ids of users (posts) in OlegDB,
-            indexes equal to their indexes in embedding matrices
-        """
-        super(DotProduct, self).__init__()
-
-        self.sig = nn.Sigmoid()
-
-        self.u = nn.Embedding(*user_emb)
-        self.u_bias = nn.Embedding(*user_bias)
-
-        self.p = nn.Embedding(*post_emb)
-        self.p_bias = nn.Embedding(*post_bias)
-
-        # attach vocabs to model
-        self.idx2post = idx2post
-        self.idx2user = idx2user
-        # user and post vocabulars:
-        # keys are DB user_ids, values are idxs in embedding matrices 
-        self.user2idx = {o:i for i,o in enumerate(idx2user)}
-        self.post2idx = {o:i for i,o in enumerate(idx2post)}
-
-    def forward(self, x):
-        users = self.u(x[:,0])
-        posts = self.p(x[:,1])
-        res = (users * posts).sum(dim=1,keepdim=True)
-        res += self.u_bias(x[:,0]) + self.p_bias(x[:,1])
-        res = res.squeeze(1)
-        return self.sig(res)*1.05
+from staff.utils import PostsCache
 
 class UserPostChannelNN(nn.Module):
     """ Model that distinguishes channels and posts """
@@ -142,38 +107,6 @@ class DataLoader():
 
         return x_stack, y_stack
 
-# DELETE abandoned
-class InferDataLoader():
-    """ data loader for inferring """
-
-    def __init__(self,posts,user,user2idx,post2idx,channel2idx):
-        self.posts = posts
-        self.user = user
-
-        self.user2idx = user2idx
-        self.post2idx = post2idx
-        self.channel2idx = channel2idx
-        
-    def get_data(self):
-        x_stack = []
-        for p in self.posts:
-            # only append those posts which are present in vocab
-            try:
-                x_stack.append(
-                    tensor([
-                        self.user2idx[self.user.id],
-                        self.post2idx[p.id],
-                        self.channel2idx[p.tg_channel_id]
-                    ])
-                )
-            except KeyError:
-                pass
-        x_stack = torch.stack(x_stack)
-
-        return x_stack
-
-
-
 class OlegNN():
     """
     neural net functions for OlegAI
@@ -221,9 +154,10 @@ class OlegNN():
 
     def init_model(self):
         """ instantiates new model with random embeddings """
-        
+
         # make vocabs
-        idx2post = self.app.dba.get_post_ids()
+        self.posts_cache = PostsCache(self.app.dba)     # cache posts
+        idx2post = list(self.posts_cache.long)
         idx2user = self.app.dba.get_user_ids()
         idx2channel = self.app.dba.get_tg_channel_ids()
 
@@ -235,15 +169,6 @@ class OlegNN():
             idx2post,
             idx2channel,
             self.n_hidden)
-
-        #self.model = DotProduct(
-        #    (len(idx2user),self.lpv_len),
-        #    (len(idx2user),1),
-        #    (len(idx2post),self.lpv_len),
-        #    (len(idx2post),1),
-        #    idx2user,
-        #    idx2post
-        #)
 
     def closest(self, posts, user, offset=0):
         """

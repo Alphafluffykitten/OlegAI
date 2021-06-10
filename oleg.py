@@ -1,10 +1,10 @@
 import logging
-from staff.utils import OlegApp
+from staff.client import OlegApp
 import threading, signal
 import os
 
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                     level=logging.INFO)
+#logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+#                     level=logging.INFO)
 
 stopit = threading.Event()
 def got_ipt(signo,frame):

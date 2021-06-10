@@ -292,8 +292,8 @@ class OlegDBAdapter():
         user_id: int
         internal_post_id: int
         learned: bool
-        limit: int. Default = 10000
-        order: str. Default = 'random' (newest first). Can be 'asc' or 'desc' or 'random'
+        limit: int
+        order: str. Default = 'random'. Can be 'asc' or 'desc' or 'random'
         with_channels: bool. If True, joins OlegDB.posts.tg_channel_id
         """
 
@@ -350,6 +350,17 @@ class OlegDBAdapter():
             kwargs = {colname:r[idx] for idx,colname in enumerate(cols)}
             ur.append(UserReaction(**kwargs))
         return ur
+
+    def get_user_reactions_post_ids(self):
+        """ Returns set of distinct post ids that present in user_reactions table """
+        
+        sql = f'SELECT DISTINCT internal_post_id FROM {UserReaction.table_name}'
+        rows = self.db.query(sql)
+        ids = set()
+        for r in rows:
+            ids.add(r[0])
+
+        return ids
 
     def add_repost(self, post, user):
         ''' writes information about repost to OlegDB '''
