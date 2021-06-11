@@ -3,6 +3,7 @@ from torch import nn, tensor
 import random
 import time
 import threading
+from threading import Lock
 from staff.olegtypes import *
 from staff.utils import PostsCache
 
@@ -144,10 +145,15 @@ class OlegNN():
         self.inc_cycles = 0                 # how many incremental cycles have passed since last full cycle
         self.last_learning_cycle = 0        # when was last learning cycle
         
-        self.learning = False
+        self.learning = Lock()             # race condition avoiding flag
+        self.model_lock = Lock()           # race condition avoiding flag
         self.losses = []
 
+
     def start(self):
+
+        self.posts_cache = PostsCache(self.app.dba)
+
         # run learning in serial mode, will instantiate new model
         self.learn_data(full=True)
 
@@ -155,20 +161,23 @@ class OlegNN():
     def init_model(self):
         """ instantiates new model with random embeddings """
 
-        # make vocabs
-        self.posts_cache = PostsCache(self.app.dba)     # cache posts
-        idx2post = list(self.posts_cache.long)
-        idx2user = self.app.dba.get_user_ids()
-        idx2channel = self.app.dba.get_tg_channel_ids()
+        with self.model_lock:
 
-        self.model = UserPostChannelNN(
-            (len(idx2user), self.user_lpv_len),
-            (len(idx2post), self.post_lpv_len),
-            (len(idx2channel), self.channel_lpv_len),
-            idx2user,
-            idx2post,
-            idx2channel,
-            self.n_hidden)
+            # make vocabs
+            self.posts_cache.renew()     # cache posts
+            idx2post = list(self.posts_cache.long)
+            idx2user = self.app.dba.get_user_ids()
+            idx2channel = self.app.dba.get_tg_channel_ids()
+
+            self.model = UserPostChannelNN(
+                (len(idx2user), self.user_lpv_len),
+                (len(idx2post), self.post_lpv_len),
+                (len(idx2channel), self.channel_lpv_len),
+                idx2user,
+                idx2post,
+                idx2channel,
+                self.n_hidden)
+
 
     def closest(self, posts, user, offset=0):
         """
@@ -180,8 +189,10 @@ class OlegNN():
         offset (int, default=0): will return top-offset post
         """
 
-        x = self.get_infer_data(posts, user)
-        preds = self.model.forward(x)
+        with self.model_lock:
+            x = self.get_infer_data(posts, user)
+            preds = self.model.forward(x)
+
 
         # add some shuffle to result
         preds = self.shuffle(preds, amount=self.closest_shuffle)
@@ -227,7 +238,7 @@ class OlegNN():
             now - self.last_learning_cycle >= self.learning_timeout
         ):
             # if not learning now, run learning process
-            if not self.learning:
+            if not self.learning.locked():
                 self.new_reactions_counter = 0
                 self.last_learning_cycle = now
 
@@ -255,39 +266,38 @@ class OlegNN():
         full (bool): if set, will learn full dataset of user reactions
         """
         
-        self.learning = True
+        with self.learning:
 
-        # get reactions
-        if full:
-            ur = self.app.dba.get_user_reactions(with_channels=True)
-            self.init_model()
-        else:
-            ur = self.app.dba.get_user_reactions(learned=0,with_channels=True)
-            # add 96% old reactions to dataset or 4 batches
-            ur = ur + self.app.dba.get_user_reactions(learned=1,limit=max(len(ur)*30,self.bs*4-len(ur)),with_channels=True)
-        
-        if not ur:
-            self.learning = False
-            return
-        
-        # DataLoader should provide batches like x.shape = (bs,3) y.shape = (bs,1)
-        dl = DataLoader(ur, self.bs, self.model.user2idx, self.model.post2idx, self.model.channel2idx)
+            # get reactions
+            if full:
+                ur = self.app.dba.get_user_reactions(with_channels=True)
+                self.init_model()
+            else:
+                ur = self.app.dba.get_user_reactions(learned=0,with_channels=True)
+                # add 96% old reactions to dataset or 4 batches
+                ur = ur + self.app.dba.get_user_reactions(learned=1,limit=max(len(ur)*30,self.bs*4-len(ur)),with_channels=True)
+            
+            if not ur:
+                self.learning = False
+                return
+            
+            # DataLoader should provide batches like x.shape = (bs,3) y.shape = (bs,1)
+            dl = DataLoader(ur, self.bs, self.model.user2idx, self.model.post2idx, self.model.channel2idx)
 
-        if full:
-            epochs = self.full_learn_epochs
-        else:
-            # prelearned embeddings already are in memory
-            epochs = self.incremental_epochs
+            if full:
+                epochs = self.full_learn_epochs
+            else:
+                # prelearned embeddings already are in memory
+                epochs = self.incremental_epochs
 
-        self._learn(dl, self.model, epochs)
+            self._learn(dl, self.model, epochs)
 
-        # set learned=1 for reactions in dl
-        self.app.dba.set_reactions_learned(ur)
+            # set learned=1 for reactions in dl
+            self.app.dba.set_reactions_learned(ur)
 
-        ur = None
-        dl = None
+            ur = None
+            dl = None
 
-        self.learning = False
 
     def _learn(self,dl,model,epochs=1):
 

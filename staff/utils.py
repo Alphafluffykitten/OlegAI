@@ -495,13 +495,16 @@ class OlegHashing():
             return ''
 
 class PostsCache():
-    """ Provides smart cache for DB objects """
+    """ Provides smart cache for .posts and set of post ids under .long which should go into model """
 
     def __init__(self, dba):
-        self.long = dba.get_user_reactions_post_ids()
+        self.dba = dba
+    
+    def renew(self):
+        self.long = self.dba.get_user_reactions_post_ids()
 
         ten_days_ago = (datetime.datetime.now() - datetime.timedelta(days=10)).timestamp()
-        self.posts = dba.get_posts(
+        self.posts = self.dba.get_posts(
             have_content = True,
             tg_timestamp_range = (ten_days_ago, time.time())
         )
@@ -510,6 +513,7 @@ class PostsCache():
             short.add(p.id)
 
         self.long = self.long | short
+
 
     
 

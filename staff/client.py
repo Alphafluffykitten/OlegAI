@@ -367,8 +367,6 @@ class Bot():
 
     def edit_inline_keyboard(self, user_id, post_id, reaction_id):
         """ edits inline keyboard with sign of chosen reaction """
-        
-        # TODO
         pass
 
     def got_callback_reaction(self,payload,query_id):
