@@ -377,32 +377,25 @@ class OlegNN():
         fwd_voc = f'idx2{where}'
         bkwd_voc = f'{where}2idx'
 
-        # DEBUG
-        self.app.debug.nn_obj = obj
+        # add emb to embedding matrix
+        if obj.id not in getattr(self.model, bkwd_voc):
+            emb_rows = getattr(self.model, embname).weight.shape[0]
 
-        try: #DEBUG
-            # add emb to embedding matrix
-            if obj.id not in getattr(self.model, bkwd_voc):
-                emb_rows = getattr(self.model, embname).weight.shape[0]
-
-                # add row to emb
-                setattr(
-                    self.model, embname,
-                    nn.Embedding.from_pretrained(
-                        torch.cat(
-                            (getattr(self.model, embname).weight.detach(), emb),
-                            dim=0
-                        )
+            # add row to emb
+            setattr(
+                self.model, embname,
+                nn.Embedding.from_pretrained(
+                    torch.cat(
+                        (getattr(self.model, embname).weight.detach(), emb),
+                        dim=0
                     )
                 )
-                getattr(self.model, embname).weight.requires_grad_(True)
+            )
+            getattr(self.model, embname).weight.requires_grad_(True)
 
-                # add value to vocab
-                getattr(self.model, fwd_voc).append(obj.id)
-                getattr(self.model, bkwd_voc)[obj.id] = emb_rows
-        except AttributeError as e:
-            self.app.logger.error(self.app.debug)
-            raise e
+            # add value to vocab
+            getattr(self.model, fwd_voc).append(obj.id)
+            getattr(self.model, bkwd_voc)[obj.id] = emb_rows
 
         self.learning = False
 

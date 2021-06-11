@@ -515,17 +515,22 @@ class ListenerHub():
                 self.app.debug.lhub_post1 = post
 
                 # add new post to model - will be added on model reinit (with cache renew)
-                #self.app.nn.handle_new_obj(where='post', obj = post)
 
                 listener = self.get_listener(sender_id)
-                # forward new post to bot, so bot will have access to media
-                res = listener.tdutil.forward_post(
-                    from_msg_id = post.tg_msg_id,
-                    from_channel_id = post.tg_channel_id,
-                    to_user_id = self.app.bot.user_id
-                )
-                if res.error:
-                    self.app.logger.error(res.error_info)
+
+                #DEBUG
+                try:
+                    # forward new post to bot, so bot will have access to media
+                    res = listener.tdutil.forward_post(
+                        from_msg_id = post.tg_msg_id,
+                        from_channel_id = post.tg_channel_id,
+                        to_user_id = self.app.bot.user_id
+                    )
+                    if res.error:
+                        self.app.logger.error(res.error_info)
+                except AttributeError as e:
+                    self.app.logger.error(self.app.debug)
+                    raise e
 
     def _type_supported(self, message):
         """ takes TDLib.message and checks if type of content is supported by OlegAI """
