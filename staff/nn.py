@@ -366,48 +366,42 @@ class OlegNN():
     def add_emb(self, where, obj, emb):
         """ Adds new embedding to embedding matrix """
 
-        # block until learning cycle done
-        while self.learning:
-            time.sleep(0.1)
+        with self.learning:
 
-        self.learning = True
+            emb = emb.unsqueeze(0)
 
-        emb = emb.unsqueeze(0)
+            voc = {
+                'post': 'p',
+                'user': 'u',
+                'channel': 'c'
+            }
+            if where not in voc:
+                raise Exception('[ OlegNN.add_emb ]: where must be "post", "user" or "channel"')
 
-        voc = {
-            'post': 'p',
-            'user': 'u',
-            'channel': 'c'
-        }
-        if where not in voc:
-            raise Exception('[ OlegNN.add_emb ]: where must be "post", "user" or "channel"')
+            embname = voc[where]
 
-        embname = voc[where]
+            fwd_voc = f'idx2{where}'
+            bkwd_voc = f'{where}2idx'
 
-        fwd_voc = f'idx2{where}'
-        bkwd_voc = f'{where}2idx'
+            # add emb to embedding matrix
+            if obj.id not in getattr(self.model, bkwd_voc):
+                emb_rows = getattr(self.model, embname).weight.shape[0]
 
-        # add emb to embedding matrix
-        if obj.id not in getattr(self.model, bkwd_voc):
-            emb_rows = getattr(self.model, embname).weight.shape[0]
-
-            # add row to emb
-            setattr(
-                self.model, embname,
-                nn.Embedding.from_pretrained(
-                    torch.cat(
-                        (getattr(self.model, embname).weight.detach(), emb),
-                        dim=0
+                # add row to emb
+                setattr(
+                    self.model, embname,
+                    nn.Embedding.from_pretrained(
+                        torch.cat(
+                            (getattr(self.model, embname).weight.detach(), emb),
+                            dim=0
+                        )
                     )
                 )
-            )
-            getattr(self.model, embname).weight.requires_grad_(True)
+                getattr(self.model, embname).weight.requires_grad_(True)
 
-            # add value to vocab
-            getattr(self.model, fwd_voc).append(obj.id)
-            getattr(self.model, bkwd_voc)[obj.id] = emb_rows
-
-        self.learning = False
+                # add value to vocab
+                getattr(self.model, fwd_voc).append(obj.id)
+                getattr(self.model, bkwd_voc)[obj.id] = emb_rows
 
     def handle_new_obj(self, where, obj):
         """ Adds embedding to model for new object """
