@@ -513,8 +513,3 @@ class PostsCache():
             short.add(p.id)
 
         self.long = self.long | short
-
-
-    
-
-
