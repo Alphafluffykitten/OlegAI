@@ -128,6 +128,7 @@ class OlegNN():
         learning_timeout,           # min interval between learning cycles, seconds
         full_learn_threshold,       # how many incremental learning cycles to start a full learning cycle
         closest_shuffle,            # shuffle amount of prediction result
+        posts_cache_days,           # depth of inferring
     ):
     
         self.user_lpv_len = int(user_lpv_len)
@@ -141,6 +142,8 @@ class OlegNN():
         self.full_learn_threshold = int(full_learn_threshold)
         self.closest_shuffle = float(closest_shuffle)
 
+        self.posts_cache_days = int(posts_cache_days)
+
         self.new_reactions_counter = 0      # new reactions since last learning cycle
         self.inc_cycles = 0                 # how many incremental cycles have passed since last full cycle
         self.last_learning_cycle = 0        # when was last learning cycle
@@ -152,7 +155,7 @@ class OlegNN():
 
     def start(self):
 
-        self.posts_cache = PostsCache(self.app.dba)
+        self.posts_cache = PostsCache(self.app.dba, self.posts_cache_days)
 
         # run learning in serial mode, will instantiate new model
         self.learn_data(full=True)

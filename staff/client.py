@@ -39,6 +39,7 @@ class OlegApp():
                  nn_learning_timeout,
                  nn_full_learn_threshold,
                  nn_closest_shuffle,
+                 nn_posts_cache_days,
                  max_listener_channels,):
 
         self.logs_dir = logs_dir
@@ -57,7 +58,8 @@ class OlegApp():
             nn_new_reactions_threshold,
             nn_learning_timeout,
             nn_full_learn_threshold,
-            nn_closest_shuffle,)
+            nn_closest_shuffle,
+            nn_posts_cache_days)
 
         self.lhub = ListenerHub(
             api_id = api_id,
@@ -205,9 +207,9 @@ class Bot():
         # if message from a user, not a chat
         if  message.get('sender',{}).get('@type','') == 'messageSenderUser':
             tg_user_id = message.get('chat_id',0)
-            username = self.tdutil.get_username(tg_user_id)
             # if there is no such user in OlegDB
             if not self.app.dba.get_user(tg_user_id = tg_user_id):
+                username = self.tdutil.get_username(tg_user_id)
                 user = self.app.dba.register_user(tg_user_id, username)
                 if user:
                     self.app.nn.handle_new_obj('user', user)
@@ -507,29 +509,19 @@ class ListenerHub():
 
                 # write new post to OlegDB
                 post = self._prepare_oleg_post(message)
-                #DEBUG
-                self.app.debug.lhub_post = post
                 post = self.app.dba.add_post(post)
-                self.app.debug.lhub_post1 = post
 
                 # if post've been added successfully
                 if post:
-
                     listener = self.get_listener(sender_id)
 
-                    #DEBUG
-                    try:
-                        # forward new post to bot, so bot will have access to media
-                        res = listener.tdutil.forward_post(
-                            from_msg_id = post.tg_msg_id,
-                            from_channel_id = post.tg_channel_id,
-                            to_user_id = self.app.bot.user_id
-                        )
-                        if res.error:
-                            self.app.logger.error(res.error_info)
-                    except AttributeError as e:
-                        self.app.logger.error(self.app.debug)
-                        raise e
+                    # forward new post to bot, so bot will have access to media
+                    res = listener.tdutil.forward_post(
+                        from_msg_id = post.tg_msg_id,
+                        from_channel_id = post.tg_channel_id,
+                        to_user_id = self.app.bot.user_id)
+                    if res.error:
+                        self.app.logger.error(res.error_info)
 
     def _type_supported(self, message):
         """ takes TDLib.message and checks if type of content is supported by OlegAI """

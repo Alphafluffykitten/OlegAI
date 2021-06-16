@@ -1,7 +1,6 @@
 torch
 apscheduler == 3.6.3
 psycopg2-binary>=2.8
-python-dotenv
 notebook
 requests
 matplotlib

@@ -67,8 +67,6 @@ class TDLibUtils():
         if self.greeting and m:
             self.greeting(m)
 
-        sender_type = m.get('sender',{}).get('@type','')
-
         # parse bot commands
         command, params = self._parse_commands(m)
         
@@ -77,11 +75,15 @@ class TDLibUtils():
         else:
             self._apply_msg_filter(m)
 
-    def _parse_commands(self,message):
+    def _parse_commands(self, message):
         """ parses bot commands from TDLib.message, returns a list without '/' """
-        
-        text = message.get('content',{}).get('text',{}).get('text','')
-        entities = message.get('content',{}).get('text',{}).get('entities',[])
+        # DEBUG
+        try:
+            text = message.get('content',{}).get('text',{}).get('text','')
+            entities = message.get('content',{}).get('text',{}).get('entities',[])
+        except AttributeError as e:
+            print(message)
+            raise e
         
         command, params = (None,None)
         for e in entities:
@@ -155,6 +157,10 @@ class TDLibUtils():
         """ sends TDLib.sendMessage """
         result = self._send_data('sendMessage', message)
         return result
+
+    def send_text(self, user, text):
+        """ Sends text message to user """
+        return self.tg.send_message(user, text)
         
     
     def forward_post(self, from_msg_id, from_channel_id, to_user_id):
@@ -495,18 +501,19 @@ class OlegHashing():
             return ''
 
 class PostsCache():
-    """ Provides smart cache for .posts and set of post ids under .long which should go into model """
+    """ Provides smart cache for .posts and set of post ids which should go into model under .long """
 
-    def __init__(self, dba):
+    def __init__(self, dba, cache_days=10):
         self.dba = dba
+        self.cache_days = cache_days
     
     def renew(self):
         self.long = self.dba.get_user_reactions_post_ids()
 
-        ten_days_ago = (datetime.datetime.now() - datetime.timedelta(days=10)).timestamp()
+        days_ago = (datetime.datetime.now() - datetime.timedelta(days=self.cache_days)).timestamp()
         self.posts = self.dba.get_posts(
             have_content = True,
-            tg_timestamp_range = (ten_days_ago, time.time())
+            tg_timestamp_range = (days_ago, time.time())
         )
         short = set()
         for p in self.posts:
