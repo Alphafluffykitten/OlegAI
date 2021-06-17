@@ -206,7 +206,7 @@ class Bot():
 
         # if message from a user, not a chat
         if  message.get('sender',{}).get('@type','') == 'messageSenderUser':
-            tg_user_id = message.get('chat_id',0)
+            tg_user_id = message.get('sender',{}).get('user_id',0)
             # if there is no such user in OlegDB
             if not self.app.dba.get_user(tg_user_id = tg_user_id):
                 username = self.tdutil.get_username(tg_user_id)
@@ -247,14 +247,14 @@ class Bot():
     def send_new_handler(self, message, params):
         """ sends new post when user asks with /send_new """
         
-        tg_user_id = message.get('chat_id',0)
+        tg_user_id = message.get('sender',{}).get('user_id',0)
         user = self.app.dba.get_user(tg_user_id=tg_user_id)
         self._users_send_new([user])
 
     def send_channels_last(self, message, params):
         """ sends last post from given channel to user from which message was received """
 
-        tg_user_id = message.get('chat_id',0)
+        tg_user_id = message.get('sender',{}).get('user_id',0)
         user = self.app.dba.get_user(tg_user_id = tg_user_id)
         post = self.app.dba.get_posts(tg_channel_id = params[0], have_content=True, limit=1)
         if post:

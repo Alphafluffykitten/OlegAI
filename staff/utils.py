@@ -77,25 +77,27 @@ class TDLibUtils():
 
     def _parse_commands(self, message):
         """ parses bot commands from TDLib.message, returns a list without '/' """
-        # DEBUG
-        try:
-            text = message.get('content',{}).get('text',{}).get('text','')
-            entities = message.get('content',{}).get('text',{}).get('entities',[])
-        except AttributeError as e:
-            print(message)
-            raise e
-        
         command, params = (None,None)
-        for e in entities:
-            if e.get('type',{}).get('@type','') == 'textEntityTypeBotCommand':
-                offset = e.get('offset',0)
-                start = offset + 1
-                end = offset + e.get('length',0)
-                command = text[start:end]
-                # parse command params
-                params = (text[end:]).split(' ')
-                params = list(filter(bool,params))
-                break
+
+        if message.get('content',{}).get('@type','') == 'messageText':
+            # DEBUG
+            try:
+                text = message.get('content',{}).get('text',{}).get('text','')
+                entities = message.get('content',{}).get('text',{}).get('entities',[])
+            except AttributeError as e:
+                print(message)
+                raise e
+            
+            for e in entities:
+                if e.get('type',{}).get('@type','') == 'textEntityTypeBotCommand':
+                    offset = e.get('offset',0)
+                    start = offset + 1
+                    end = offset + e.get('length',0)
+                    command = text[start:end]
+                    # parse command params
+                    params = (text[end:]).split(' ')
+                    params = list(filter(bool,params))
+                    break
         return command, params
 
     def _apply_msg_filter(self,message):
@@ -253,7 +255,7 @@ class TDLibUtils():
 
 class Converters():
     """ 
-        takes TDLib.message and makes TDLib.sendMessage with source link appended
+        Takes TDLib.message and makes TDLib.sendMessage with source link appended
 
         Notes:
         - cannot pass attached message.content.web_page to the inputMessageText since
@@ -339,7 +341,7 @@ class Converters():
     def _append_inline_keyboard(self, message, user_id, post_id):
         """ appends reply buttons to the TDLib.sendMessage """
         
-        m = message
+        m = message.copy()
         reactions = self.app.bot.reactions
 
         buttons = []
@@ -432,7 +434,7 @@ class Converters():
                     '@type': 'inputFileRemote',
                     'id': video.get('video',{}).get('remote',{}).get('id',0),
                 },
-                'duration': video.get('duratoin',0),
+                'duration': video.get('duration',0),
                 'width': video.get('width',0),
                 'height': video.get('height',0),
                 'file_name': video.get('file_name',0),
