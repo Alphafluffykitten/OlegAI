@@ -80,13 +80,8 @@ class TDLibUtils():
         command, params = (None,None)
 
         if message.get('content',{}).get('@type','') == 'messageText':
-            # DEBUG
-            try:
-                text = message.get('content',{}).get('text',{}).get('text','')
-                entities = message.get('content',{}).get('text',{}).get('entities',[])
-            except AttributeError as e:
-                print(message)
-                raise e
+            text = message.get('content',{}).get('text',{}).get('text','')
+            entities = message.get('content',{}).get('text',{}).get('entities',[])
             
             for e in entities:
                 if e.get('type',{}).get('@type','') == 'textEntityTypeBotCommand':
@@ -156,13 +151,13 @@ class TDLibUtils():
         
     
     def send_message(self, message):
-        """ sends TDLib.sendMessage """
+        """ Sends TDLib.sendMessage """
         result = self._send_data('sendMessage', message)
         return result
 
-    def send_text(self, user, text):
-        """ Sends text message to user """
-        return self.tg.send_message(user, text)
+    def send_text(self, tg_user_id, text):
+        """ Sends text message to tg_user_id """
+        return self.tg.send_message(tg_user_id, text)
         
     
     def forward_post(self, from_msg_id, from_channel_id, to_user_id):
@@ -247,45 +242,59 @@ class TDLibUtils():
         }
         return self._send_data('checkChatInviteLink',data)
 
+    def download_file(self, file_id):
+        data = {
+            'file_id': file_id,
+            'priority': 32,
+            'offset': 0,
+            'limit': 0,
+            'synchronous': True
+        }
+        return self._send_data('downloadFile', data)
 
 
 
 
 
 
-class Converters():
+
+class Converter():
     """ 
-        Takes TDLib.message and makes TDLib.sendMessage with source link appended
-
-        Notes:
-        - cannot pass attached message.content.web_page to the inputMessageText since
-        there is no such attribute when you send a message
+    Takes TDLib.message and makes TDLib.sendMessage
+    Provides some helper methods to append stuff to the message
     """
 
     # TODO: take care of albums
     
     def __init__(self):
-        # read supported methods from this class
-        self.supported = [f for f in dir(Converters) if not f.startswith('_')]
+
+        self.tconv = TypeConverters()
+
+        # read supported methods
+        self.supported = [f for f in dir(TypeConverters) if not f.startswith('_')]
     
-    def convert(self, user_id, post_id, tg_user_id, message, sourcename, source):
-        """ router method """
+    def convert(self,message):
+        """
+        Converts message into TDLib.sendMessage
+        To get message ready to send to user, use append_recepient_user
+
+        Args:
+        message (dict): TDLib.message with content to be converted
+        """
         
         content_type = message.get('content',{}).get('@type','')
         if content_type in self.supported:
-            result = getattr(self, content_type)(message)
+            result = getattr(self.tconv, content_type)(message)
         else:
-            #raise Exception(f'[ Converters.convert ]: Content @type {content_type} not supported')
             return False
         
-        result['chat_id'] = tg_user_id
-        result = self._append_inline_keyboard(result,user_id,post_id)
-        result = self._append_source_info_as_text_url(result,sourcename,source)
-        #result = self._append_moar_button(result,user_id)
-        
         return result
+
+    def append_recepient_user(self, message, user):
+        message['chat_id'] = user.tg_user_id
+        return message
     
-    def _append_source_info_as_text_url(self, message,sourcename,source):
+    def append_source_info_as_text_url(self, message,sourcename,source):
         """ appends source link at the end of TDLib.sendMessage text or caption"""
         
         m = message.copy()
@@ -297,7 +306,7 @@ class Converters():
         elif 'caption' in mcontent:
             textcaption = 'caption'
         else:
-            raise Exception('[ Converters._append_source_info ] No text or caption content')
+            raise Exception('[ Converter._append_source_info ] No text or caption content')
             
         messagetext = m.get('input_message_content',{}).get(textcaption,{}).get('text','')
         
@@ -319,7 +328,7 @@ class Converters():
         
         return m
 
-    def _append_source_info_as_button(self, message,sourcename,source):
+    def append_source_info_as_button(self, message,sourcename,source):
 
         m = message.copy()
 
@@ -338,7 +347,7 @@ class Converters():
 
         return m
 
-    def _append_inline_keyboard(self, message, user_id, post_id):
+    def append_inline_keyboard(self, message, user_id, post_id):
         """ appends reply buttons to the TDLib.sendMessage """
         
         m = message.copy()
@@ -365,7 +374,7 @@ class Converters():
         }
         return m
 
-    def _append_moar_button(self,message,user_id):
+    def append_moar_button(self,message,user_id):
         """ appends MOAR button to reply keyboard """
 
         data = self.app.bot.hash.hash_b64encode(f'COMMAND {user_id} send_new')
@@ -385,6 +394,10 @@ class Converters():
 
         message['reply_markup']['rows'].append([button])
         return message
+    
+
+class TypeConverters():
+    """ Type converters for Converter """
 
     def messageText(self,message):
        
@@ -400,14 +413,7 @@ class Converters():
     
     def messagePhoto(self,message):
         
-        # search for max size
-        sizes = message.get('content',{}).get('photo',{}).get('sizes',[])
-        w = []
-        for s in sizes:
-            w.append(s.get('width',0))
-        maxsizeindex = w.index(max(w))
-        
-        maxsize = sizes[maxsizeindex]
+        maxsize = self._get_photo_max_size(message)
             
         post = {
             'input_message_content': {
@@ -424,6 +430,18 @@ class Converters():
         
         return post
 
+    def _get_photo_max_size(self, message):
+        # search for max size
+        sizes = message.get('content',{}).get('photo',{}).get('sizes',[])
+        w = []
+        for s in sizes:
+            w.append(s.get('width',0))
+        maxsizeindex = w.index(max(w))
+        maxsize = sizes[maxsizeindex]
+
+        return maxsize
+
+
     def messageVideo(self,message):
 
         video = message.get('content',{}).get('video',{})
@@ -437,12 +455,28 @@ class Converters():
                 'duration': video.get('duration',0),
                 'width': video.get('width',0),
                 'height': video.get('height',0),
-                'file_name': video.get('file_name',0),
-                'mime_type': video.get('mime_type',0),
                 'caption': message.get('content',{}).get('caption',{})
             }
         }
         
+        return post
+
+    def messageAnimation(self,message):
+        
+        animation = message.get('content',{}).get('animation',{})
+        post = {
+            'input_message_content': {
+                '@type': 'inputMessageAnimation',
+                'animation': {
+                    '@type': 'inputFileRemote',
+                    'id': animation.get('animation',{}).get('remote',{}).get('id',0),
+                },
+                'duration': animation.get('duration',0),
+                'width': animation.get('width',0),
+                'height': animation.get('height',0),
+                'caption': message.get('content',{}).get('caption',{}),
+            }
+        }
         return post
 
 class OlegHashing():

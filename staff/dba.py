@@ -523,3 +523,53 @@ class OlegDBAdapter():
         for r in rows:
             res[r[0]] = r[1]
         return res
+
+    def get_mailings(self, mid=None, post=None, mailing_time_range=[]):
+        """
+        Returns list of Mailing objects
+        
+        Args:
+        post (JSON): object representing post to be mailed
+        mailing_time_range (list): List of two elements. If specified, will return only those mailings
+            which fall between two timestamps (UNIX timestamp)
+        """
+
+        clauses = []
+        values = []
+        if mid is not None:
+            clauses.append(f'id = %s')
+            values.append(mid)
+        if post is not None:
+            clauses.append(f'post = %s')
+            values.append(post)
+        if mailing_time_range:
+            clauses.append(f'mailing_time BETWEEN {mailing_time_range[0]} AND {mailing_time_range[1]}')
+
+        if clauses:
+            clauses = ' AND\n'.join(clauses)
+            clauses = f'WHERE {clauses}'
+
+        sql = f'SELECT {", ".join(Mailing.cols)} FROM {Mailing.table_name} {clauses} ORDER BY id ASC'
+        rows = self.db.query(sql,values)
+        mailings = []
+        for r in rows:
+            kwargs = {colname:r[idx] for idx,colname in enumerate(Mailing.cols)}
+            mailings.append(Mailing(**kwargs))
+            
+        return mailings
+
+    def add_mailing(self,post, mailing_time):
+        mailing = self.get_mailings(mailing_time_range=[mailing_time-1, mailing_time+1])
+
+        added = None
+        if not mailing:
+            sql = f'INSERT INTO {Mailing.table_name} (post, mailing_time, timestamp) VALUES (%s, %s, %s) RETURNING *'
+            rows = self.db.query(sql, [post,mailing_time,int(time.time())])
+            mailings = []
+            for r in rows:
+                kwargs = {colname:r[idx] for idx,colname in enumerate(Mailing.cols)}
+                mailings.append(Mailing(**kwargs))
+
+            added = mailings
+
+        return added

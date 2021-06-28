@@ -38,7 +38,7 @@ app = OlegApp(
     nn_full_learn_threshold = env['nn_full_learn_threshold'],
     nn_closest_shuffle = env['nn_closest_shuffle'],
     nn_posts_cache_days = env['nn_posts_cache_days'],
-    max_listener_channels = env['max_listener_channels'],
+    max_listener_channels = env['max_listener_channels']
 )
 
 

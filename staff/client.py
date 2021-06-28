@@ -1,16 +1,16 @@
 from staff.olegtypes import *
 from staff.dba import OlegDBAdapter
-from staff.utils import Converters
-from staff.utils import OlegHashing
-from staff.utils import TDLibUtils
+from staff.utils import Converter, OlegHashing, TDLibUtils
 from staff.nn import OlegNN
 from staff.crawler import Joiner, CrawlerDB
 from staff.filters import Filters
+from adm.dialogs import NewMailing, dumps
 from apscheduler.schedulers.background import BackgroundScheduler
 import os
 import logging
 from types import SimpleNamespace
 import time, datetime
+from zoneinfo import ZoneInfo
 
 
 class OlegApp():
@@ -48,7 +48,7 @@ class OlegApp():
         self.logger = self._setup_logging()
         
         self.dba = OlegDBAdapter(db_name,db_user,db_password,db_host)
-        self.conv = Converters()
+        self.conv = Converter()
         self.hash = OlegHashing(salt = salt, trunc = 7)
         self.nn = OlegNN(
             nn_user_lpv_len,
@@ -80,12 +80,6 @@ class OlegApp():
         self.joiner = Joiner(self.crawler_db, self.lhub, logs_dir = logs_dir)
         
         self.scheduler = BackgroundScheduler(timezone = 'Europe/Moscow')
-        self.scheduled = self.scheduler.add_job(
-            func = self.bot.scheduled_mailing,
-            trigger = 'cron',
-            hour = '10,12,14,16,19',
-            minute = '20',
-            coalesce = True,)
 
         self.debug = SimpleNamespace()
 
@@ -149,8 +143,7 @@ class OlegApp():
 
 class Bot():
     """ 
-    implements interaction functionality between
-    bot and bot user
+    Implements interaction functionality between bot and user
     """
     
     def __init__(
@@ -172,6 +165,9 @@ class Bot():
 
         self.admin_user_id = admin_user_id
         
+        # dict of user contexts where keys are User.id and values are dialog objects
+        self.context = {}
+
     def start(self):
         
         # this executes upon receiving any update.message from TDLib
@@ -183,6 +179,7 @@ class Bot():
         self.tdutil.add_command_handler('send_channel',self.send_channels_last)
         self.tdutil.add_command_handler('start_joiner', self.start_joiner_handler, Filters.user(self.admin_user_id))
         self.tdutil.add_command_handler('stop_joiner', self.stop_joiner_handler, Filters.user(self.admin_user_id))
+        self.tdutil.add_command_handler('new_mailing', self.new_mailing_handler, Filters.user(self.admin_user_id))
         self.tdutil.tg.add_update_handler('updateNewCallbackQuery', self.callback_query_handler)
 
         # set got_admin_forward handler for every listener
@@ -192,14 +189,62 @@ class Bot():
                 self.got_admin_forward
             )
 
+        self.tdutil.add_message_handler(Filters.all, self.context_router)
+
         self.tdutil.start()
 
         self.user_id = self.tdutil.get_me()
         self.reactions = self.app.dba.get_reactions()
 
+        self.schedule_jobs()
+
         
     def stop(self):
         self.tdutil.stop()
+
+    def schedule_jobs(self):
+        """ At start, schedules all upcoming mailing events """
+
+        self.scheduled = {}
+
+        # regular mass mailing of new posts using NN.closest
+        self.scheduled['regular'] = self.app.scheduler.add_job(
+            func = self.regular_mailing,
+            trigger = 'cron',
+            hour = '10,12,16,19',
+            minute = '20',
+            coalesce = True,)
+
+        # irregular mailings from OlegDB.mailing table
+        self.scheduled['irregular'] = {}
+        now = int(time.time())
+        #print('now', now)
+        planned = self.app.dba.get_mailings(mailing_time_range=[now, now+1000000000])
+
+        for p in planned:
+            self.schedule_ir_mailing(p)
+
+    def schedule_ir_mailing(self,mailing):
+        run_date = datetime.datetime.fromtimestamp(mailing.mailing_time)
+        run_date = run_date.replace(tzinfo=ZoneInfo('UTC'))
+        self.scheduled['irregular'][mailing.id] = self.app.scheduler.add_job(
+            func = self.irregular_mailing,
+            args = [mailing.id],
+            trigger = 'date',
+            run_date = run_date
+        )
+
+    def context_router(self, message):
+        #print('context router here', dumps(message))
+        user = self.get_sender(message)
+        if not user: return
+
+        if user.id not in self.context:
+            return
+        
+        if self.context[user.id].next:
+            self.context[user.id].next(message)
+
         
     def user_greeting(self, message):
         """ if user is unknown, register him """
@@ -207,6 +252,8 @@ class Bot():
         # if message from a user, not a chat
         if  message.get('sender',{}).get('@type','') == 'messageSenderUser':
             tg_user_id = message.get('sender',{}).get('user_id',0)
+            if tg_user_id == self.user_id: return
+
             # if there is no such user in OlegDB
             if not self.app.dba.get_user(tg_user_id = tg_user_id):
                 username = self.tdutil.get_username(tg_user_id)
@@ -247,15 +294,16 @@ class Bot():
     def send_new_handler(self, message, params):
         """ sends new post when user asks with /send_new """
         
-        tg_user_id = message.get('sender',{}).get('user_id',0)
-        user = self.app.dba.get_user(tg_user_id=tg_user_id)
-        self._users_send_new([user])
+        sender = self.get_sender(message)
+        if sender:
+            self._users_send_new([sender])
 
     def send_channels_last(self, message, params):
         """ sends last post from given channel to user from which message was received """
 
-        tg_user_id = message.get('sender',{}).get('user_id',0)
-        user = self.app.dba.get_user(tg_user_id = tg_user_id)
+        user = self.get_sender(message)
+        if not user: return
+        if not params: return
         post = self.app.dba.get_posts(tg_channel_id = params[0], have_content=True, limit=1)
         if post:
             post = post[0]
@@ -273,6 +321,22 @@ class Bot():
 
     def stop_joiner_handler(self, message, params):
         self.app.joiner.stop()
+
+    def new_mailing_handler(self,message,params):
+        """ Switches context to NewMailing dialog """
+        user = self.get_sender(message)
+        if not user: return
+
+        self.context[user.id] = NewMailing(user, self.app)
+
+    def get_sender(self, message):
+        """ Returns User object, sender of the message argument """
+
+        user = None
+        if message.get('sender',{}).get('@type','') == 'messageSenderUser':
+            tg_user_id = message.get('sender',{}).get('user_id', 0)
+            user = self.app.dba.get_user(tg_user_id=tg_user_id)
+        return user
 
     def _users_send_new(self, users):
         """ For each user calls nn.closest and sends best post """
@@ -321,14 +385,11 @@ class Bot():
 
         chat_title = listener.tdutil.get_chat_title(tdmessage)
         messagelink = listener.tdutil.get_message_link(tdmessage)
-        res = self.app.conv.convert(
-            user_id = user.id,
-            post_id = post.id,
-            tg_user_id = user.tg_user_id,
-            message = tdmessage,
-            sourcename = chat_title,
-            source = messagelink
-        )
+        res = self.app.conv.convert(message = tdmessage)
+        res = self.app.conv.append_recepient_user(message = res, user = user)
+        res = self.app.conv.append_inline_keyboard(res, user.id, post.id)
+        res = self.app.conv.append_source_info_as_text_url(res, chat_title, messagelink)
+
         return res
 
         
@@ -395,12 +456,38 @@ class Bot():
             self._users_send_new([user])
             self.tdutil.answer_callback_query(query_id = query_id, text = 'Here you go')
 
-    def scheduled_mailing(self):
+    def regular_mailing(self):
         """ This is called when scheduled time of mass mailing come """
 
         users = self.app.dba.get_users()
         self._users_send_new(users)
 
+    def irregular_mailing(self, mid):
+        """ Irregular mass mailing of post with id=mid from OlegDB.mailing """
+
+        mailing = self.app.dba.get_mailings(mid=mid)
+        if not mailing: return
+        
+        post = mailing[0].post
+        users = self.app.dba.get_users()
+
+        for u in users:
+            post['chat_id'] = u.tg_user_id
+            self.tdutil.send_message(post)
+
+
+    def save_mailing(self, post, mailing_time):
+        """ Saves mailing to DB, returns True if saved """
+
+        # add new mailing only if nothing is planned 10 min before and 10 min after
+        added = None
+        if not self.app.dba.get_mailings(mailing_time_range=[mailing_time-60, mailing_time+60]):
+            added = self.app.dba.add_mailing(post,mailing_time)
+            if added:
+                self.schedule_ir_mailing(added[0])
+        
+
+        return bool(added)
 
 
 

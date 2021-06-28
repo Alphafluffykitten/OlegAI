@@ -100,6 +100,16 @@ class ChannelPool(BaseDBObject):
         'joined',
         'error_code']
 
+class Mailing(BaseDBObject):
+    """ Mailing post """
+    table_name = 'mailing'
+    cols = [
+        'id',
+        'post',
+        'mailing_time',
+        'timestamp',
+    ]
+
 class MessageHandler(SimpleNamespace):
     """ TDLibUtils messages handler """
     def __init__(self,
