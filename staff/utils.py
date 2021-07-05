@@ -40,6 +40,7 @@ class TDLibUtils():
         
     def start(self):
         self.tg.login()
+        self.user_id = self.get_me()
         
     def stop(self):
         self.tg.stop()
@@ -62,6 +63,9 @@ class TDLibUtils():
         """ routes different kinds of message updates to its handlers """
         
         m = update.get('message',{})
+
+        sender = self.get_sender(m)
+        if sender == self.user_id: return
         
         # code that'll execute upon receiving any message
         if self.greeting and m:
@@ -182,6 +186,13 @@ class TDLibUtils():
             user = update.get('id',0)
             return user
 
+    def get_sender(self,message):
+        """ Returns sender's tg_user_id """
+        tg_user_id = None
+        if message.get('sender',{}).get('@type','') == 'messageSenderUser':
+            tg_user_id = message.get('sender',{}).get('user_id', 0)
+        return tg_user_id
+
     def get_username(self, tg_user_id):
         """ returns username of Telegram user by his TG user_id """
 
@@ -291,8 +302,9 @@ class Converter():
         return result
 
     def append_recepient_user(self, message, user):
-        message['chat_id'] = user.tg_user_id
-        return message
+        m = message.copy()
+        m['chat_id'] = user.tg_user_id
+        return m
     
     def append_source_info_as_text_url(self, message,sourcename,source):
         """ appends source link at the end of TDLib.sendMessage text or caption"""

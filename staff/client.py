@@ -193,7 +193,7 @@ class Bot():
 
         self.tdutil.start()
 
-        self.user_id = self.tdutil.get_me()
+        self.user_id = self.tdutil.user_id
         self.reactions = self.app.dba.get_reactions()
 
         self.schedule_jobs()
@@ -250,18 +250,19 @@ class Bot():
         """ if user is unknown, register him """
 
         # if message from a user, not a chat
-        if  message.get('sender',{}).get('@type','') == 'messageSenderUser':
-            tg_user_id = message.get('sender',{}).get('user_id',0)
-            if tg_user_id == self.user_id: return
+        user = self.get_sender(message)
 
-            # if there is no such user in OlegDB
-            if not self.app.dba.get_user(tg_user_id = tg_user_id):
-                username = self.tdutil.get_username(tg_user_id)
-                user = self.app.dba.register_user(tg_user_id, username)
-                if user:
-                    self.app.nn.handle_new_obj('user', user)
-                    self.user_bootstrap(user)
-                    self._users_send_new([user])
+        # if there is no such user in OlegDB
+        if not user:
+            tg_user_id = self.tdutil.get_sender(message)
+            if not tg_user_id: return
+            
+            username = self.tdutil.get_username(tg_user_id)
+            user = self.app.dba.register_user(tg_user_id, username)
+            if user:
+                self.app.nn.handle_new_obj('user', user)
+                self.user_bootstrap(user)
+                self._users_send_new([user])
                     
     def user_bootstrap(self, user):
         """ routine for newly registered user """
@@ -332,9 +333,8 @@ class Bot():
     def get_sender(self, message):
         """ Returns User object, sender of the message argument """
 
-        user = None
-        if message.get('sender',{}).get('@type','') == 'messageSenderUser':
-            tg_user_id = message.get('sender',{}).get('user_id', 0)
+        tg_user_id = self.tdutil.get_sender(message)
+        if tg_user_id:
             user = self.app.dba.get_user(tg_user_id=tg_user_id)
         return user
 
@@ -472,8 +472,8 @@ class Bot():
         users = self.app.dba.get_users()
 
         for u in users:
-            post['chat_id'] = u.tg_user_id
-            self.tdutil.send_message(post)
+            to_send = self.app.conv.append_recepient_user(post,u)
+            self.tdutil.send_message(to_send)
 
 
     def save_mailing(self, post, mailing_time):
