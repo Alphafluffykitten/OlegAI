@@ -309,7 +309,6 @@ class OlegDBAdapter():
         if clauses:
             clauses = 'WHERE\n'+clauses
 
-
         if limit is not None:
             limit= f'LIMIT {limit}'
         else:

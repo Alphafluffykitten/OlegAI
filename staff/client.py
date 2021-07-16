@@ -11,6 +11,7 @@ import logging
 from types import SimpleNamespace
 import time, datetime
 from zoneinfo import ZoneInfo
+import threading
 
 
 class OlegApp():
@@ -182,11 +183,11 @@ class Bot():
         self.tdutil.add_command_handler('new_mailing', self.new_mailing_handler, Filters.user(self.admin_user_id))
         self.tdutil.tg.add_update_handler('updateNewCallbackQuery', self.callback_query_handler)
 
-        # set got_admin_forward handler for every listener
+        # set got_listener_forward handler for every listener
         for l in self.app.lhub.ls:
             self.tdutil.add_message_handler(
                 Filters.forwarded & Filters.user(self.app.lhub.ls[l].user_id),
-                self.got_admin_forward
+                self.got_listener_forward
             )
 
         self.tdutil.add_message_handler(Filters.all, self.context_router)
@@ -393,7 +394,7 @@ class Bot():
         return res
 
         
-    def got_admin_forward(self,message):
+    def got_listener_forward(self,message):
         """ this is called when bot gets forwarded message from listener """
         
         # find original post in OlegDB and flag content_downloaded
@@ -422,7 +423,13 @@ class Bot():
         if payload:
             route = payload.split(' ')[0]
             if route == 'VOTE':
-                self.got_callback_reaction(payload, query_id = update.get('id',0))
+                # start separate thread which will answer callback query and handle sending new message to user
+                # without blocking this main TDLib thread
+                thread = threading.Thread(
+                    target = self.got_callback_reaction,
+                    kwargs = {'payload': payload, 'query_id': update.get('id',0)}
+                )
+                thread.start()
             elif route == 'COMMAND':
                 self.got_callback_command(payload, query_id = update.get('id',0))
         else:
