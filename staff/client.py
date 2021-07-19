@@ -335,6 +335,7 @@ class Bot():
         """ Returns User object, sender of the message argument """
 
         tg_user_id = self.tdutil.get_sender(message)
+        user = None
         if tg_user_id:
             user = self.app.dba.get_user(tg_user_id=tg_user_id)
         return user
