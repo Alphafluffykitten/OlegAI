@@ -25,6 +25,7 @@ class Post(BaseDBObject):
         'tg_msg_id',
         'tg_channel_id',
         'tg_timestamp',
+        'tg_album_id',
         'content_downloaded',
         'timestamp'
     ]

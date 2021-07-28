@@ -310,11 +310,8 @@ class Bot():
         if post:
             post = post[0]
 
-            to_send = self._prepare_message(user,post)
+            self._prepare_send(user, post)
 
-            res = self.tdutil.send_message(to_send)
-            if res.error:
-                self.app.logger.error(res.error_info)
         else:
             res = self.tdutil.tg.send_message(chat_id=user.tg_user_id, text=f'No posts found from channel {params[0]}')
 
@@ -351,22 +348,38 @@ class Bot():
             return
 
         for u in users:
-            to_send = None
             for i in range(100):
                 filtered = self.app.nn.closest(posts, u, offset=i)
-                # try to find post that havent been reposted
-                if not self.app.dba.get_reposts(filtered.id, u.id):
-                    to_send = self._prepare_message(u, filtered)
-                    # check if it's still there
-                    if to_send:
-                        break
-            if to_send: 
-                res = self.tdutil.send_message(to_send)
-                if res.error:
-                    self.app.logger.error('[ Bot._users_send_new ]: '+str(res.error_info))
+                if self._prepare_send(u, filtered): break
 
-                # write reposted info to OlegDB.reposts
-                self.app.dba.add_repost(filtered, u)
+    def _prepare_send(self, user, post):
+        """ Prepares message or album (if post is part of album) and sends them """
+
+        to_send = None; to_send_album = None
+        # try to find post that havent been reposted
+        if not self.app.dba.get_reposts(post.id, user.id):
+            # if message belongs to album
+            if post.tg_album_id:
+                album_posts = self.app.dba.get_posts(tg_album_id = post.tg_album_id)
+                to_send_album, to_send = self._prepare_album(user, album_posts)
+            else:
+                # if no album
+                album_posts = [post]
+                to_send = self._prepare_message(user, post)
+        if to_send:
+            if to_send_album:
+                res = self.tdutil.send_message_album(to_send_album)
+                res.wait()
+
+            res = self.tdutil.send_message(to_send)
+            if res.error:
+                self.app.logger.error('[ Bot._users_send_new ]: '+str(res.error_info))
+
+            # write reposted info to OlegDB.reposts
+            for ap in album_posts:
+                self.app.dba.add_repost(ap, user)
+        
+        return bool(to_send)
 
 
     def _prepare_message(self,user,post):
@@ -387,13 +400,40 @@ class Bot():
 
         chat_title = listener.tdutil.get_chat_title(tdmessage)
         messagelink = listener.tdutil.get_message_link(tdmessage)
-        res = self.app.conv.convert(message = tdmessage)
+        input_message_content = self.app.conv.convert(message = tdmessage)
+        res = self.app.conv.make_send_message(input_message_content = input_message_content)
         res = self.app.conv.append_recepient_user(message = res, user = user)
         res = self.app.conv.append_inline_keyboard(res, user.id, post.id)
         res = self.app.conv.append_source_info_as_text_url(res, chat_title, messagelink)
 
         return res
 
+    def _prepare_album(self, user, posts):
+        """
+        Prepares sendMessageAlbum for sending (without first message of album containing caption)
+         and sendMessage containing first message of album with its caption
+
+        Returns: tuple:
+         to_send_album - raw for sendMessageAlbum
+         to_send - raw for sendMessage
+        """
+
+        listener = self.app.lhub.get_listener(posts[0].tg_channel_id)
+        if not listener: return None
+
+        # Pack all items except first one into album.
+        # First one will go separately afterwards, with reply markup attached
+        input_message_contents = []
+        for i in range(len(posts)-1):
+            tdmessage = listener.tdutil.get_post(tg_channel_id=posts[i].tg_channel_id, tg_msg_id=posts[i].tg_msg_id)
+            input_message_contents.append(self.app.conv.convert(message = tdmessage))
+        
+        to_send_album = self.app.conv.make_send_message_album(input_message_contents = input_message_contents)
+        to_send_album = self.app.conv.append_recepient_user(message=to_send_album, user=user)
+
+        to_send = self._prepare_message(user, posts[-1])
+
+        return to_send_album, to_send
         
     def got_listener_forward(self,message):
         """ this is called when bot gets forwarded message from listener """
@@ -601,6 +641,8 @@ class ListenerHub():
             # and @type of content is supported and add post to OlegDB
             if (self._listening(sender_id)) and (self._type_supported(message)):
                 #print('chat listening and type supported ok')
+                #DEBUG
+                #print(dumps(message))
 
                 # write new post to OlegDB
                 post = self._prepare_oleg_post(message)
@@ -643,12 +685,14 @@ class ListenerHub():
         tg_msg_id = message.get('id',0)
         tg_channel_id = message.get('chat_id',0)
         tg_timestamp = message.get('date',0)
+        tg_album_id = message.get('media_album_id',0)
 
         # create Post
         post = Post(
             tg_msg_id = tg_msg_id,
             tg_channel_id = tg_channel_id,
-            tg_timestamp = tg_timestamp
+            tg_timestamp = tg_timestamp,
+            tg_album_id = tg_album_id,
         )
         return post
 

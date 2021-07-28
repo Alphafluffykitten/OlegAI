@@ -81,8 +81,8 @@ class OlegDBAdapter():
         return users
 
     def get_posts(
-        self, ids = [], exc_ids = [], dataset = None, tg_msg_id=None, tg_channel_id=None, have_content=None,
-        tg_timestamp_range=(), limit=None, except_user=None):
+        self, ids = [], exc_ids = [], dataset = None, tg_msg_id=None, tg_channel_id=None, tg_album_id=None,
+        have_content=None, tg_timestamp_range=(), limit=None, except_user=None):
         """
         Gets posts from OlegDB, newest first
         
@@ -93,6 +93,7 @@ class OlegDBAdapter():
         that present in user_reactions table. If 'exclude', excludes these posts from select
         tg_msg_id (int, optional): tg_msg_id to search for
         tg_channel_id (int,optional): tg_channel_id to search for
+        tg_album_id (int,optional): search messages with corresponding tg_album_id
         have_content (bool, optional): if flagged, searches only for content_downloaded=1
         tg_timestamp_range (tuple, optional): if passed, searches only for timestamps within range
         limit (int, optional): default = 1000, max = 1000
@@ -118,6 +119,9 @@ class OlegDBAdapter():
 
         if tg_channel_id:
             clauses.append(f'tg_channel_id = {tg_channel_id}')
+        
+        if tg_album_id:
+            clauses.append(f'tg_album_id = {tg_album_id}')
 
         if have_content is not None:
             clauses.append(f'content_downloaded = {bool(have_content)}')
@@ -172,8 +176,8 @@ class OlegDBAdapter():
             posts.append(Post(**kwargs))
 
         # DEBUG
-        self.app.debug.dba_sql = sql
-        self.app.debug.dba_posts = posts
+        #self.app.debug.dba_sql = sql
+        #self.app.debug.dba_posts = posts
         return posts
 
     def get_post_ids(self,content_downloaded=None):
@@ -210,10 +214,10 @@ class OlegDBAdapter():
         if not posts:
             # insert new post
             sql = f'''
-                INSERT INTO {Post.table_name} (tg_msg_id, tg_channel_id, tg_timestamp, timestamp)
-                VALUES (%s, %s, %s, %s)
+                INSERT INTO {Post.table_name} (tg_msg_id, tg_channel_id, tg_timestamp, tg_album_id, timestamp)
+                VALUES (%s, %s, %s, %s, %s)
             '''
-            self.db.push(sql,[post.tg_msg_id, post.tg_channel_id, post.tg_timestamp, int(time.time())])
+            self.db.push(sql,[post.tg_msg_id, post.tg_channel_id, post.tg_timestamp, post.tg_album_id, int(time.time())])
 
             # get newly added post
             new_post = self.get_posts(tg_msg_id = post.tg_msg_id, tg_channel_id = post.tg_channel_id)
@@ -221,7 +225,7 @@ class OlegDBAdapter():
                 raise Exception(f'[ OlegDBAdapter ]: Couldn\'t add new post to DB, {new_post}')
             
             #DEBUG
-            self.app.debug.new_post = new_post[0]
+            #self.app.debug.new_post = new_post[0]
             
             return new_post[0]
 

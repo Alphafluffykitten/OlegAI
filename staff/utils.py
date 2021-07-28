@@ -35,13 +35,14 @@ class TDLibUtils():
                            phone = phone,
                            files_directory = files_directory)
         
-        # listen to any update.message and pass it to update_handler
-        self.tg.add_message_handler(self.update_handler)
         
     def start(self):
         self.tg.login()
         self.user_id = self.get_me()
-        
+
+        # listen to any update.message and pass it to update_handler
+        self.tg.add_message_handler(self.update_handler)
+
     def stop(self):
         self.tg.stop()
         
@@ -157,6 +158,10 @@ class TDLibUtils():
     def send_message(self, message):
         """ Sends TDLib.sendMessage """
         result = self._send_data('sendMessage', message)
+        return result
+
+    def send_message_album(self, message):
+        result = self._send_data('sendMessageAlbum', message)
         return result
 
     def send_text(self, tg_user_id, text):
@@ -301,6 +306,20 @@ class Converter():
         
         return result
 
+    def make_send_message(self, input_message_content):
+        m = {
+            '@type': 'sendMessage',
+            'input_message_content': input_message_content
+        }
+        return m
+    
+    def make_send_message_album(self,input_message_contents):
+        m = {
+            '@type': 'sendMessageAlbum',
+            'input_message_contents': input_message_contents
+        }
+        return m
+
     def append_recepient_user(self, message, user):
         m = message.copy()
         m['chat_id'] = user.tg_user_id
@@ -409,16 +428,17 @@ class Converter():
     
 
 class TypeConverters():
-    """ Type converters for Converter """
+    """ 
+    Type converters for Converter
+    Takes TDLib.message and returns corresponding to its type TDLib.inputMessageContent
+    """
 
     def messageText(self,message):
        
         post = {
-            'input_message_content': {
-                '@type': 'inputMessageText',
-                'text': message.get('content',{}).get('text',{}),
-                'disable_web_page_preview': (not bool(message.get('content',{}).get('web_page',{})))
-            }
+            '@type': 'inputMessageText',
+            'text': message.get('content',{}).get('text',{}),
+            'disable_web_page_preview': (not bool(message.get('content',{}).get('web_page',{})))
         }
         
         return post
@@ -428,17 +448,16 @@ class TypeConverters():
         maxsize = self._get_photo_max_size(message)
             
         post = {
-            'input_message_content': {
-                '@type': 'inputMessagePhoto',
-                'photo': {
-                    '@type': 'inputFileRemote',
-                    'id': maxsize.get('photo',{}).get('remote',{}).get('id',0)
-                },
-                'width': maxsize.get('width',0),
-                'height': maxsize.get('height',0),
-                'caption': message.get('content',{}).get('caption',{})
-            }
+            '@type': 'inputMessagePhoto',
+            'photo': {
+                '@type': 'inputFileRemote',
+                'id': maxsize.get('photo',{}).get('remote',{}).get('id',0)
+            },
+            'width': maxsize.get('width',0),
+            'height': maxsize.get('height',0),
+            'caption': message.get('content',{}).get('caption',{})
         }
+    
         
         return post
 
@@ -458,17 +477,15 @@ class TypeConverters():
 
         video = message.get('content',{}).get('video',{})
         post = {
-            'input_message_content': {
-                '@type': 'inputMessageVideo',
-                'video': {
-                    '@type': 'inputFileRemote',
-                    'id': video.get('video',{}).get('remote',{}).get('id',0),
-                },
-                'duration': video.get('duration',0),
-                'width': video.get('width',0),
-                'height': video.get('height',0),
-                'caption': message.get('content',{}).get('caption',{})
-            }
+            '@type': 'inputMessageVideo',
+            'video': {
+                '@type': 'inputFileRemote',
+                'id': video.get('video',{}).get('remote',{}).get('id',0),
+            },
+            'duration': video.get('duration',0),
+            'width': video.get('width',0),
+            'height': video.get('height',0),
+            'caption': message.get('content',{}).get('caption',{})
         }
         
         return post
@@ -477,17 +494,15 @@ class TypeConverters():
         
         animation = message.get('content',{}).get('animation',{})
         post = {
-            'input_message_content': {
-                '@type': 'inputMessageAnimation',
-                'animation': {
-                    '@type': 'inputFileRemote',
-                    'id': animation.get('animation',{}).get('remote',{}).get('id',0),
-                },
-                'duration': animation.get('duration',0),
-                'width': animation.get('width',0),
-                'height': animation.get('height',0),
-                'caption': message.get('content',{}).get('caption',{}),
-            }
+            '@type': 'inputMessageAnimation',
+            'animation': {
+                '@type': 'inputFileRemote',
+                'id': animation.get('animation',{}).get('remote',{}).get('id',0),
+            },
+            'duration': animation.get('duration',0),
+            'width': animation.get('width',0),
+            'height': animation.get('height',0),
+            'caption': message.get('content',{}).get('caption',{}),
         }
         return post
 
