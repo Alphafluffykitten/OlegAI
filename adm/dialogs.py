@@ -87,13 +87,13 @@ class NewMailing(Dialog):
 
     def handle_mailing_message(self, message):
         #print(dumps(message))
-        converted = self.app.conv.convert(message)
-        if not converted:
+        input_message_content = self.app.conv.convert(message)
+        if not input_message_content:
             self._answer('Message type not supported, try again')
             self.next = self.handle_mailing_message
             return
-        self.result['message'] = self.app.conv.convert(message)
-        converted = self.app.conv.append_recepient_user(converted, self.user)
+        self.result['message'] = self.app.conv.make_send_message(input_message_content)
+        converted = self.app.conv.append_recepient_user(self.result['message'], self.user)
         self.app.bot.tdutil.send_message(converted)
         self._answer('This is how its gonna look. Is it ok?', ['OK', 'No'])
         self.next = self.confirm_message
