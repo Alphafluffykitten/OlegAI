@@ -181,6 +181,7 @@ class Bot():
         self.tdutil.add_command_handler('start_joiner', self.start_joiner_handler, Filters.user(self.admin_user_id))
         self.tdutil.add_command_handler('stop_joiner', self.stop_joiner_handler, Filters.user(self.admin_user_id))
         self.tdutil.add_command_handler('new_mailing', self.new_mailing_handler, Filters.user(self.admin_user_id))
+        self.tdutil.add_command_handler('cancel', self.cancel_handler, Filters.all)
         self.tdutil.tg.add_update_handler('updateNewCallbackQuery', self.callback_query_handler)
 
         # set got_listener_forward handler for every listener
@@ -241,6 +242,9 @@ class Bot():
         if not user: return
 
         if user.id not in self.context:
+            return
+
+        if not self.context[user.id]:
             return
         
         if self.context[user.id].next:
@@ -327,6 +331,14 @@ class Bot():
         if not user: return
 
         self.context[user.id] = NewMailing(user, self.app)
+    
+    def cancel_handler(self,message,params):
+        """ Switches context to None """
+
+        user = self.get_sender(message)
+        if not user: return
+
+        self.context[user.id] = None
 
     def get_sender(self, message):
         """ Returns User object, sender of the message argument """
