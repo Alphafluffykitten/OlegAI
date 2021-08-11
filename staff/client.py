@@ -498,6 +498,14 @@ class Bot():
         user_id = int(user_id)
         post_id = int(post_id)
         reaction_id = int(reaction_id)
+
+        # check if user_id, post_id and reaction_id are still valid
+        if not (self.app.dba.get_posts(ids=[post_id]) and 
+            self.app.dba.get_user(user_id=user_id) and
+            reaction_id in self.reactions
+        ):
+            return
+            
         self.app.dba.update_reaction(user_id, post_id, reaction_id)
         #self.edit_inline_keyboard(user_id,post_id, reaction_id)
         self.tdutil.answer_callback_query(query_id = query_id, text = self.reactions[reaction_id].text)
