@@ -438,10 +438,13 @@ class Bot():
         input_message_contents = []
         for i in range(len(posts)-1):
             tdmessage = listener.tdutil.get_post(tg_channel_id=posts[i].tg_channel_id, tg_msg_id=posts[i].tg_msg_id)
-            input_message_contents.append(self.app.conv.convert(message = tdmessage))
+            if tdmessage:
+                input_message_contents.append(self.app.conv.convert(message = tdmessage))
         
-        to_send_album = self.app.conv.make_send_message_album(input_message_contents = input_message_contents)
-        to_send_album = self.app.conv.append_recepient_user(message=to_send_album, user=user)
+        to_send_album = None
+        if input_message_contents:
+            to_send_album = self.app.conv.make_send_message_album(input_message_contents = input_message_contents)
+            to_send_album = self.app.conv.append_recepient_user(message=to_send_album, user=user)
 
         to_send = self._prepare_message(user, posts[-1])
 
@@ -505,7 +508,7 @@ class Bot():
             reaction_id in self.reactions
         ):
             return
-            
+
         self.app.dba.update_reaction(user_id, post_id, reaction_id)
         #self.edit_inline_keyboard(user_id,post_id, reaction_id)
         self.tdutil.answer_callback_query(query_id = query_id, text = self.reactions[reaction_id].text)
