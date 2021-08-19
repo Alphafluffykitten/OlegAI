@@ -125,7 +125,7 @@ class TDLibUtils():
                }
         result = self._send_data('getMessage', data)
         if result.error:
-            #print(result.error_info)
+            print(result.error_info)
             pass
 
         if result.update:
@@ -267,6 +267,50 @@ class TDLibUtils():
             'synchronous': True
         }
         return self._send_data('downloadFile', data)
+
+    def get_chats(self, offset_order, offset_chat_id):
+        data = {
+            'offset_order': offset_order,
+            'offset_chat_id': str(offset_chat_id),
+            'limit': '100'
+        }
+        res = self._send_data('getChats',data)
+        if res.error:
+            return None
+        else:
+            return res.update['chat_ids']
+
+    def get_chat(self, chat_id):
+        data = {
+            'chat_id': chat_id
+        }
+        res = self._send_data('getChat',data)
+        if res.error:
+            return None
+        else:
+            return res.update
+
+    def get_all_chats_list(self):
+        """
+        Returns list of all chats of account.
+        Used to download info about chats to TDLib to be able to get messages from chats etc
+        """
+
+        new_chats = True
+        chats = self.get_chats(2**63-1,0)
+        while new_chats:
+            last_chat = self.get_chat(chats[-1])
+            last_order = last_chat['positions'][0]['order']
+            new_chats = self.get_chats(last_order,chats[-1])
+            chats = chats + new_chats
+
+        return chats
+
+    def destroy(self):
+        """ Destroys local TDLib database and loses login """
+        data = {}
+        res = self._send_data('destroy',data)
+        return res.ok_received
 
 
 

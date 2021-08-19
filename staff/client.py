@@ -407,7 +407,7 @@ class Bot():
         tdmessage = listener.tdutil.get_post(tg_channel_id=post.tg_channel_id, tg_msg_id=post.tg_msg_id)
         if not tdmessage:
             self.app.dba.set_content_downloaded(post, False)
-            #print(f'post {post} not found, setting content_downloaded=0')
+            self.app.logger.warning(f'Error getting post {post} from TDLib\nSetting content_downloaded=0') 
             return None
 
         chat_title = listener.tdutil.get_chat_title(tdmessage)
@@ -423,11 +423,11 @@ class Bot():
     def _prepare_album(self, user, posts):
         """
         Prepares sendMessageAlbum for sending (without first message of album containing caption)
-         and sendMessage containing first message of album with its caption
+        and sendMessage containing first message of album with its caption
 
         Returns: tuple:
-         to_send_album - raw for sendMessageAlbum
-         to_send - raw for sendMessage
+            to_send_album - raw for sendMessageAlbum
+            to_send - raw for sendMessage
         """
 
         listener = self.app.lhub.get_listener(posts[0].tg_channel_id)
@@ -566,7 +566,7 @@ class Bot():
 
 
 class Listener():
-    """ rules listener's TDLib account """
+    """ Rules listener's TDLib account """
 
     def __init__(
         self,
